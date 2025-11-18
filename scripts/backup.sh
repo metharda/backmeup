@@ -13,6 +13,18 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+show_usage() {
+cat << 'EOF'
+Usage: backup.sh <command> [options]
+Commands:
+  start    Set up a new backup schedule
+  update   Update existing backup script
+  delete   Remove existing backup script
+  list     List all backup scripts
+  help     Show this help message
+EOF
+}
+
 create_backup_script_template() {
     local source_dir="$1"
     local output_dir="$2"
@@ -264,12 +276,19 @@ command(){
         "start")
             start_backup "$@"
             ;;
+        "")
+            echo "Error: No command specified"
+            echo ""
+            show_usage
+            ;;
         *)
-            echo "Unknown command: $1"
+            echo "Error: Unknown command: $1"
+            echo ""
+            show_usage
             ;;
     esac
 }
-
+            
 if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     command "$@"
 fi
