@@ -424,7 +424,7 @@ update_backup() {
     rm -f "${script}.bak"
     
     if [[ "$new_schedule" != "$old_schedule" ]]; then
-        bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}"
+        bash "${SCRIPT_DIR}/cron.sh" remove "${backup_name}"
         bash "${SCRIPT_DIR}/cron.sh" add "$script" "$new_schedule"
     fi
     
@@ -467,10 +467,8 @@ delete_backup() {
         fi
     fi
     
-    bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}" 2>/dev/null || true
-    
+    bash "${SCRIPT_DIR}/cron.sh" remove "${backup_name}" 2>/dev/null || true
     remove_backup_config "$backup_name"
-    
     log_success "Backup '$backup_name' deleted successfully"
 }
 
