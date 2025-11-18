@@ -205,7 +205,7 @@ setup_cron_job() {
         return 1
     fi
     
-    exec "${SCRIPT_DIR}/cron.sh" add "$script_path" "$time_period"
+    bash "${SCRIPT_DIR}/cron.sh" add "$script_path" "$time_period"
 }
 
 select_time_period() {
@@ -241,97 +241,6 @@ select_time_period() {
             return 1
             ;;
     esac
-}
-
-update_backup() {
-    local backup_name="$1"
-    shift
-    
-    if [[ -z "$backup_name" ]]; then
-        log_error "Backup name is required"
-        echo "Usage: backup update <backup_name> [options]"
-        echo "Options: -t <time_period> | -b <backup_count>"
-        return 1
-    fi
-    
-    local config_line=$(get_backup_config "$backup_name")
-    if [[ -z "$config_line" ]]; then
-        log_error "Backup '$backup_name' not found"
-        echo "Use 'backup list' to see available backups"
-        return 1
-    fi
-    
-    IFS='|' read -r name source output script old_schedule old_count <<< "$config_line"
-    
-    local new_schedule="$old_schedule"
-    local new_count="$old_count"
-    
-    while [[ $# -gt 0 ]]; do
-        case $1 in
-            -t|--time-period)
-                new_schedule="$2"
-                shift 2
-                ;;
-            -b|--backup-count)
-                new_count="$2"
-                shift 2
-                ;;
-            *)
-                log_error "Unknown option: $1"
-                return 1
-                ;;
-        esac
-    done
-    
-    if [[ ! -f "$script" ]]; then
-        log_error "Backup script not found: $script"
-        return 1
-    fi
-    
-    sed -i.bak "s|BACKUP_COUNT=\".*\"|BACKUP_COUNT=\"$new_count\"|g" "$script"
-    rm -f "${script}.bak"
-    
-    if [[ "$new_schedule" != "$old_schedule" ]]; then
-        bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}"
-        bash "${SCRIPT_DIR}/cron.sh" add "$script" "$new_schedule"
-    fi
-    
-    remove_backup_config "$backup_name"
-    save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count"
-    
-    log_success "Backup '$backup_name' updated successfully"
-    echo "Schedule: $new_schedule"
-    echo "Keep: $new_count backups"
-}
-
-delete_backup() {
-    local backup_name="$1"
-    
-    if [[ -z "$backup_name" ]]; then
-        log_error "Backup name is required"
-        echo "Usage: backup delete <backup_name>"
-        return 1
-    fi
-    
-    local config_line=$(get_backup_config "$backup_name")
-    if [[ -z "$config_line" ]]; then
-        log_error "Backup '$backup_name' not found"
-        echo "Use 'backup list' to see available backups"
-        return 1
-    fi
-    
-    IFS='|' read -r name source output script schedule count <<< "$config_line"
-    
-    if [[ -f "$script" ]]; then
-        rm -f "$script"
-        log_info "Removed backup script: $script"
-    fi
-    
-    bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}" 2>/dev/null || true
-    
-    remove_backup_config "$backup_name"
-    
-    log_success "Backup '$backup_name' deleted successfully"
 }
 
 start_backup(){
@@ -463,6 +372,105 @@ start_backup(){
         log_error "Failed to create backup script"
         return 1
     fi
+}
+
+update_backup() {
+    local backup_name="$1"
+    shift
+    
+    if [[ -z "$backup_name" ]]; then
+        log_error "Backup name is required"
+        echo "Usage: backup update <backup_name> [options]"
+        echo "Options: -t <time_period> | -b <backup_count>"
+        return 1
+    fi
+    
+    local config_line=$(get_backup_config "$backup_name")
+    if [[ -z "$config_line" ]]; then
+        log_error "Backup '$backup_name' not found"
+        echo "Use 'backup list' to see available backups"
+        return 1
+    fi
+    
+    IFS='|' read -r name source output script old_schedule old_count <<< "$config_line"
+    
+    local new_schedule="$old_schedule"
+    local new_count="$old_count"
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -t|--time-period)
+                new_schedule="$2"
+                shift 2
+                ;;
+            -b|--backup-count)
+                new_count="$2"
+                shift 2
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ ! -f "$script" ]]; then
+        log_error "Backup script not found: $script"
+        return 1
+    fi
+    
+    sed -i.bak "s|BACKUP_COUNT=\".*\"|BACKUP_COUNT=\"$new_count\"|g" "$script"
+    rm -f "${script}.bak"
+    
+    if [[ "$new_schedule" != "$old_schedule" ]]; then
+        bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}"
+        bash "${SCRIPT_DIR}/cron.sh" add "$script" "$new_schedule"
+    fi
+    
+    remove_backup_config "$backup_name"
+    save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count"
+    
+    log_success "Backup '$backup_name' updated successfully"
+    echo "Schedule: $new_schedule"
+    echo "Keep: $new_count backups"
+}
+
+delete_backup() {
+    local backup_name="$1"
+    
+    if [[ -z "$backup_name" ]]; then
+        log_error "Backup name is required"
+        echo "Usage: backup delete <backup_name>"
+        return 1
+    fi
+    
+    local config_line=$(get_backup_config "$backup_name")
+    if [[ -z "$config_line" ]]; then
+        log_error "Backup '$backup_name' not found"
+        echo "Use 'backup list' to see available backups"
+        return 1
+    fi
+    
+    IFS='|' read -r name source output script schedule count <<< "$config_line"
+    
+    if [[ -f "$script" ]]; then
+        rm -f "$script"
+        log_info "Removed backup script: $script"
+        
+        local backmeup_dir="$(dirname "$script")"
+        if [[ -d "$backmeup_dir" ]] && [[ "$(basename "$backmeup_dir")" == ".backmeup" ]]; then
+            if [[ -z "$(ls -A "$backmeup_dir" 2>/dev/null)" ]]; then
+                rm -rf "$backmeup_dir"
+                log_info "Removed empty .backmeup directory: $backmeup_dir"
+            fi
+        fi
+    fi
+    
+    bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}" 2>/dev/null || true
+    
+    remove_backup_config "$backup_name"
+    
+    log_success "Backup '$backup_name' deleted successfully"
 }
 
 command(){
