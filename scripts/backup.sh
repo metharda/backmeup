@@ -12,6 +12,97 @@ log_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+CONFIG_DIR="${HOME}/.config/backmeup"
+CONFIG_FILE="${CONFIG_DIR}/backups.conf"
+
+init_config() {
+    if [[ ! -d "${CONFIG_DIR}" ]]; then
+        mkdir -p "${CONFIG_DIR}"
+    fi
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        touch "${CONFIG_FILE}"
+    fi
+}
+
+save_backup_config() {
+    local backup_name="$1"
+    local source_dir="$2"
+    local output_dir="$3"
+    local script_path="$4"
+    local time_period="$5"
+    local backup_count="$6"
+    
+    init_config
+    
+    echo "${backup_name}|${source_dir}|${output_dir}|${script_path}|${time_period}|${backup_count}" >> "${CONFIG_FILE}"
+}
+
+get_backup_config() {
+    local backup_name="$1"
+    
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        return 1
+    fi
+    
+    grep "^${backup_name}|" "${CONFIG_FILE}"
+}
+
+remove_backup_config() {
+    local backup_name="$1"
+    
+    if [[ ! -f "${CONFIG_FILE}" ]]; then
+        return 0
+    fi
+    
+    local temp_file="${CONFIG_FILE}.tmp"
+    grep -v "^${backup_name}|" "${CONFIG_FILE}" > "${temp_file}" || true
+    mv "${temp_file}" "${CONFIG_FILE}"
+}
+
+list_backups() {
+    if [[ ! -f "${CONFIG_FILE}" ]] || [[ ! -s "${CONFIG_FILE}" ]]; then
+        log_info "No backups configured"
+        return 0
+    fi
+    
+    echo ""
+    echo "=== Configured Backups ==="
+    echo ""
+    
+    while IFS='|' read -r name source output script schedule count; do
+        echo "Name:       $name"
+        echo "Source:     $source"
+        echo "Output:     $output"
+        echo "Schedule:   $schedule"
+        echo "Keep:       $count backups"
+        echo "Script:     $script"
+        echo "---"
+    done < "${CONFIG_FILE}"
+    
+    echo ""
+}
+
+expand_path() {
+    local path="$1"
+    eval echo "$path"
+}
+
+validate_directory() {
+    local path="$1"
+    local name="$2"
+    
+    if [[ ! -e "$path" ]]; then
+        log_error "$name does not exist: $path"
+        return 1
+    fi
+    
+    if [[ ! -d "$path" ]]; then
+        log_error "$name is not a directory: $path"
+        return 1
+    fi
+    
+    return 0
+}
 
 show_usage() {
 cat << 'EOF'
@@ -26,8 +117,8 @@ EOF
 }
 
 create_backup_script_template() {
-    local source_dir="$1"
-    local output_dir="$2"
+    local source_dir="$(expand_path "$1")"
+    local output_dir="$(expand_path "$2")"
     local time_period="$3"
     local backup_count="${4:-5}"
     
@@ -46,8 +137,7 @@ create_backup_script_template() {
         return 1
     fi
     
-    if [[ ! -d "$source_dir" ]]; then
-        log_error "Source directory does not exist: $source_dir"
+    if ! validate_directory "$source_dir" "Source directory"; then
         return 1
     fi
     
@@ -100,8 +190,8 @@ TEMPLATE_EOF
     sed -i.bak "s|OUTPUT_DIR_PLACEHOLDER|$output_dir|g" "$script_path"
     sed -i.bak "s|BACKUP_COUNT_PLACEHOLDER|$backup_count|g" "$script_path"
     rm -f "${script_path}.bak"
-    
     chmod +x "$script_path"
+    save_backup_config "$(basename "$source_dir")" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count"
     log_success "Backup script created: $script_path"
     echo "$script_path"
 }
@@ -119,6 +209,7 @@ setup_cron_job() {
 }
 
 select_time_period() {
+    local choice
     echo ""
     echo "Select backup schedule:"
     echo "  1) Hourly       - Every hour"
@@ -150,6 +241,97 @@ select_time_period() {
             return 1
             ;;
     esac
+}
+
+update_backup() {
+    local backup_name="$1"
+    shift
+    
+    if [[ -z "$backup_name" ]]; then
+        log_error "Backup name is required"
+        echo "Usage: backup update <backup_name> [options]"
+        echo "Options: -t <time_period> | -b <backup_count>"
+        return 1
+    fi
+    
+    local config_line=$(get_backup_config "$backup_name")
+    if [[ -z "$config_line" ]]; then
+        log_error "Backup '$backup_name' not found"
+        echo "Use 'backup list' to see available backups"
+        return 1
+    fi
+    
+    IFS='|' read -r name source output script old_schedule old_count <<< "$config_line"
+    
+    local new_schedule="$old_schedule"
+    local new_count="$old_count"
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -t|--time-period)
+                new_schedule="$2"
+                shift 2
+                ;;
+            -b|--backup-count)
+                new_count="$2"
+                shift 2
+                ;;
+            *)
+                log_error "Unknown option: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ ! -f "$script" ]]; then
+        log_error "Backup script not found: $script"
+        return 1
+    fi
+    
+    sed -i.bak "s|BACKUP_COUNT=\".*\"|BACKUP_COUNT=\"$new_count\"|g" "$script"
+    rm -f "${script}.bak"
+    
+    if [[ "$new_schedule" != "$old_schedule" ]]; then
+        bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}"
+        bash "${SCRIPT_DIR}/cron.sh" add "$script" "$new_schedule"
+    fi
+    
+    remove_backup_config "$backup_name"
+    save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count"
+    
+    log_success "Backup '$backup_name' updated successfully"
+    echo "Schedule: $new_schedule"
+    echo "Keep: $new_count backups"
+}
+
+delete_backup() {
+    local backup_name="$1"
+    
+    if [[ -z "$backup_name" ]]; then
+        log_error "Backup name is required"
+        echo "Usage: backup delete <backup_name>"
+        return 1
+    fi
+    
+    local config_line=$(get_backup_config "$backup_name")
+    if [[ -z "$config_line" ]]; then
+        log_error "Backup '$backup_name' not found"
+        echo "Use 'backup list' to see available backups"
+        return 1
+    fi
+    
+    IFS='|' read -r name source output script schedule count <<< "$config_line"
+    
+    if [[ -f "$script" ]]; then
+        rm -f "$script"
+        log_info "Removed backup script: $script"
+    fi
+    
+    bash "${SCRIPT_DIR}/cron.sh" remove "backup_${backup_name}" 2>/dev/null || true
+    
+    remove_backup_config "$backup_name"
+    
+    log_success "Backup '$backup_name' deleted successfully"
 }
 
 start_backup(){
@@ -199,10 +381,12 @@ start_backup(){
         
         if [[ -z "$directory" ]]; then
             read -p "Source directory to backup: " directory
+            directory=$(expand_path "$directory")
         fi
         
         if [[ -z "$output_dir" ]]; then
             read -p "Backup destination directory: " output_dir
+            output_dir=$(expand_path "$output_dir")
         fi
         
         if [[ -z "$time_period" ]]; then
@@ -231,6 +415,13 @@ start_backup(){
         echo "  backup.sh start -i"
         echo "  backup.sh start -d ~/Photos -o /backup -t '0 3 * * *' -b 7"
         echo ""
+        return 1
+    fi
+    
+    directory=$(expand_path "$directory")
+    output_dir=$(expand_path "$output_dir")
+    
+    if ! validate_directory "$directory" "Source directory"; then
         return 1
     fi
     
@@ -270,9 +461,9 @@ start_backup(){
 }
 
 command(){
-    local command=$1
+    local cmd=$1
     shift
-    case $command in
+    case $cmd in
         "start")
             start_backup "$@"
             ;;
@@ -283,19 +474,13 @@ command(){
             delete_backup "$@"
             ;;
         "list")
-            list_backups "$@"
+            list_backups
             ;;
-        "help"|"--help"|"-h")
-            show_usage
-            ;;
-        "")
-            echo "Error: No command specified"
-            echo ""
+        "help"|"")
             show_usage
             ;;
         *)
-            echo "Error: Unknown command: $command"
-            echo ""
+            echo "Unknown command: $cmd"
             show_usage
             ;;
     esac
