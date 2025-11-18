@@ -27,8 +27,8 @@ BackMeUp - Automated Backup Solution
 Usage: backmeup <command> [options]
 
 Commands:
-  backup <start|update|delete|list>       Setup automated backup
-  help                                    Show this help message
+  backup <start|update|delete|list|create|restore>  Manage backups
+  help                                              Show this help message
 
 "backup start" Options:
   -d, --directory <path>     Source directory to backup
@@ -41,6 +41,8 @@ Examples:
     backmeup backup start -i
     backmeup backup start -d ~/Documents -o ~/Backups -t daily
     backmeup backup start -d ~/Photos -o /backup -t "0 3 * * *" -b 10
+    backmeup backup create -d ~/Documents -o ~/Backups
+    backmeup backup restore -f ~/Backups/Documents_20231118_120000.tar.gz -o ~/Restored
 EOF
 }
 

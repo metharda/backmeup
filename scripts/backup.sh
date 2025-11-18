@@ -110,6 +110,8 @@ cat << 'EOF'
 Usage: backup.sh <command> [options]
 Commands:
   start    Set up a new backup schedule
+  create   Create a one-time backup (no schedule)
+  restore  Restore from a backup archive
   update   Update existing backup script
   delete   Remove existing backup script
   list     List all backup scripts
@@ -497,12 +499,193 @@ delete_backup() {
     log_success "Backup '$backup_name' deleted successfully"
 }
 
+restore_backup() {
+    local backup_file=""
+    local output_dir=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -f|--file)
+                backup_file="$2"
+                shift 2
+                ;;
+            -o|--output)
+                output_dir="$2"
+                shift 2
+                ;;
+            *)
+                log_error "Unknown flag: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ -z "$backup_file" ]] || [[ -z "$output_dir" ]]; then
+        log_error "Missing required parameters"
+        echo ""
+        echo "Usage: backup.sh restore [OPTIONS]"
+        echo ""
+        echo "Options:"
+        echo "  -f, --file <path>          Backup archive file (.tar.gz)"
+        echo "  -o, --output <path>        Restore destination directory"
+        echo ""
+        echo "Example:"
+        echo "  backup.sh restore -f ~/Backups/Documents_20231118_120000.tar.gz -o ~/Restored"
+        echo ""
+        return 1
+    fi
+    
+    backup_file=$(expand_path "$backup_file")
+    output_dir=$(expand_path "$output_dir")
+    
+    if [[ ! -f "$backup_file" ]]; then
+        log_error "Backup file does not exist: $backup_file"
+        return 1
+    fi
+    
+    if [[ ! "$backup_file" =~ \.tar\.gz$ ]]; then
+        log_error "Backup file must be a .tar.gz archive"
+        return 1
+    fi
+    
+    if [[ ! -d "$output_dir" ]]; then
+        log_info "Creating output directory: $output_dir"
+        mkdir -p "$output_dir" || {
+            log_error "Failed to create output directory"
+            return 1
+        }
+    fi
+    
+    local backup_size=$(du -h "$backup_file" | cut -f1)
+    
+    echo ""
+    log_info "Restoring backup..."
+    log_info "Backup file: $backup_file"
+    log_info "Size: $backup_size"
+    log_info "Destination: $output_dir"
+    log_warning "This may take a while depending on the size..."
+    echo ""
+    
+    log_info "Extracting archive..."
+    if tar -xzf "$backup_file" -C "$output_dir" 2>&1; then
+        echo ""
+        log_success "Restore completed successfully!"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "          Restore Information          "
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " Backup file:  $backup_file"
+        echo " Restored to:  $output_dir"
+        echo " Size:         $backup_size"
+        echo " Timestamp:    $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        return 0
+    else
+        log_error "Restore failed"
+        return 1
+    fi
+}
+
+create_onetime_backup() {
+    local directory=""
+    local output_dir=""
+    
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -d|--directory)
+                directory="$2"
+                shift 2
+                ;;
+            -o|--output)
+                output_dir="$2"
+                shift 2
+                ;;
+            *)
+                log_error "Unknown flag: $1"
+                return 1
+                ;;
+        esac
+    done
+    
+    if [[ -z "$directory" ]] || [[ -z "$output_dir" ]]; then
+        log_error "Missing required parameters"
+        echo ""
+        echo "Usage: backup.sh create [OPTIONS]"
+        echo ""
+        echo "Options:"
+        echo "  -d, --directory <path>     Source directory to backup"
+        echo "  -o, --output <path>        Backup destination directory"
+        echo ""
+        echo "Example:"
+        echo "  backup.sh create -d ~/Documents -o ~/Backups"
+        echo ""
+        return 1
+    fi
+    
+    directory=$(expand_path "$directory")
+    output_dir=$(expand_path "$output_dir")
+    
+    if ! validate_directory "$directory" "Source directory"; then
+        return 1
+    fi
+    
+    if [[ ! -d "$output_dir" ]]; then
+        log_info "Creating output directory: $output_dir"
+        mkdir -p "$output_dir" || {
+            log_error "Failed to create output directory"
+            return 1
+        }
+    fi
+    
+    local timestamp=$(date +"%Y%m%d_%H%M%S")
+    local backup_file="${output_dir}/$(basename "$directory")_${timestamp}.tar.gz"
+    
+    echo ""
+    log_info "Creating one-time backup..."
+    log_info "Source: $directory"
+    log_info "Destination: $backup_file"
+    
+    log_info "Calculating directory size..."
+    local dir_size=$(du -sh "$directory" 2>/dev/null | cut -f1)
+    log_info "Directory size: $dir_size"
+    log_warning "This may take a while depending on the size..."
+    echo ""
+    
+    log_info "Creating backup archive..."
+    if tar -czf "$backup_file" -C "$(dirname "$directory")" "$(basename "$directory")" 2>&1; then
+        local backup_size=$(du -h "$backup_file" | cut -f1)
+        echo ""
+        log_success "Backup completed successfully!"
+        echo ""
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "          Backup Information          "
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo " Source:       $directory"
+        echo " Backup file:  $backup_file"
+        echo " Size:         $backup_size"
+        echo " Timestamp:    $(date '+%Y-%m-%d %H:%M:%S')"
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo ""
+        return 0
+    else
+        log_error "Backup failed"
+        return 1
+    fi
+}
+
 command(){
     local cmd=$1
     shift
     case $cmd in
         "start")
             start_backup "$@"
+            ;;
+        "create")
+            create_onetime_backup "$@"
+            ;;
+        "restore")
+            restore_backup "$@"
             ;;
         "update")
             update_backup "$@"
