@@ -276,13 +276,25 @@ command(){
         "start")
             start_backup "$@"
             ;;
+        "update")
+            update_backup "$@"
+            ;;
+        "delete")
+            delete_backup "$@"
+            ;;
+        "list")
+            list_backups "$@"
+            ;;
+        "help"|"--help"|"-h")
+            show_usage
+            ;;
         "")
             echo "Error: No command specified"
             echo ""
             show_usage
             ;;
         *)
-            echo "Error: Unknown command: $1"
+            echo "Error: Unknown command: $command"
             echo ""
             show_usage
             ;;

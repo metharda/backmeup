@@ -27,10 +27,10 @@ BackMeUp - Automated Backup Solution
 Usage: backmeup <command> [options]
 
 Commands:
-  start [options]       Setup automated backup
-  help                  Show this help message
+  backup <start|update|delete|list>       Setup automated backup
+  help                                    Show this help message
 
-Start Options:
+"backup start" Options:
   -d, --directory <path>     Source directory to backup
   -o, --output <path>        Backup destination directory
   -t, --time-period <time>   Schedule (hourly/daily/weekly/monthly/cron)
@@ -38,10 +38,9 @@ Start Options:
   -i, --interactive          Interactive mode
 
 Examples:
-  backmeup start -d ~/Documents -o ~/Backups -t daily
-  backmeup start -d ~/Photos -o /backup -t "0 3 * * *" -b 10
-  backmeup start -i
-  backmeup cron list
+    backmeup backup start -i
+    backmeup backup start -d ~/Documents -o ~/Backups -t daily
+    backmeup backup start -d ~/Photos -o /backup -t "0 3 * * *" -b 10
 EOF
 }
 
