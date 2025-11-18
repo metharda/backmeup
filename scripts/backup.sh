@@ -103,7 +103,7 @@ setup_cron_job() {
         return 1
     fi
     
-    bash "${SCRIPT_DIR}/cron.sh" add "$script_path" "$time_period"
+    exec "${SCRIPT_DIR}/cron.sh" add "$script_path" "$time_period"
 }
 
 select_time_period() {
