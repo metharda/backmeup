@@ -65,14 +65,14 @@ add(){
         echo "$current_crontab"
     fi
     
-    if echo "$current_crontab" | grep -q "$(basename "$script_path")"; then
+    if echo "$current_crontab" | grep -qF "$script_path"; then
         log_warning "A cron job for this backup already exists"
         read -p "Do you want to update it? [y/N]: " confirm
         if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
             log_info "Skipped"
             return 0
         fi
-        current_crontab=$(echo "$current_crontab" | grep -v "$(basename "$script_path")")
+        current_crontab=$(echo "$current_crontab" | grep -vF "$script_path")
     fi
     
     log_info "Writing to crontab..."
