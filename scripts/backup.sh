@@ -14,6 +14,7 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1" >&2; }
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 CONFIG_DIR="${HOME}/.config/backmeup"
 CONFIG_FILE="${CONFIG_DIR}/backups.conf"
+SCRIPT_PATH=""
 
 init_config() {
     if [[ ! -d "${CONFIG_DIR}" ]]; then
@@ -193,7 +194,7 @@ TEMPLATE_EOF
     chmod +x "$script_path"
     save_backup_config "$(basename "$source_dir")" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count"
     log_success "Backup script created: $script_path"
-    echo "$script_path"
+    SCRIPT_PATH="$script_path"
 }
 
 setup_cron_job() {
@@ -346,10 +347,10 @@ start_backup(){
     log_info "Schedule: $time_period"
     echo ""
     
-    local script_path=$(create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count")
+    create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count"
     
-    if [[ $? -eq 0 ]] && [[ -n "$script_path" ]]; then
-        setup_cron_job "$script_path" "$time_period"
+    if [[ $? -eq 0 ]] && [[ -n "$SCRIPT_PATH" ]]; then
+        setup_cron_job "$SCRIPT_PATH" "$time_period"
         
         echo ""
         log_success "Backup mechanism setup completed!"
@@ -357,16 +358,16 @@ start_backup(){
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo "          Backup Configuration          "
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        echo "Source:       $directory"
-        echo "Destination:  $output_dir"
-        echo "Schedule:     $time_period"
-        echo "Script:       $script_path"
+        echo " Source:       $directory"
+        echo " Destination:  $output_dir"
+        echo " Schedule:     $time_period"
+        echo " Script:       $SCRIPT_PATH"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
-        echo "          Quick Commands          "
-        echo "  Manual backup:  $script_path"
-        echo "  View schedule:  crontab -l | grep backmeup"
-        echo "  Check backups:  ls -lh $output_dir/*.tar.gz"
+        echo " Quick Commands          "
+        echo " Manual backup:  $SCRIPT_PATH"
+        echo " View schedule:  crontab -l | grep backmeup"
+        echo " Check backups:  ls -lh $output_dir/*.tar.gz"
         echo ""
     else
         log_error "Failed to create backup script"
