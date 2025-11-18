@@ -210,14 +210,14 @@ setup_cron_job() {
 
 select_time_period() {
     local choice
-    echo ""
-    echo "Select backup schedule:"
-    echo "  1) Hourly       - Every hour"
-    echo "  2) Daily        - Every day at 2:00 AM"
-    echo "  3) Weekly       - Every Sunday at 2:00 AM"
-    echo "  4) Monthly      - First day of month at 2:00 AM"
-    echo "  5) Custom       - Enter custom cron format"
-    echo ""
+    echo "" >&2
+    echo "Select backup schedule:" >&2
+    echo "  1) Hourly       - Every hour" >&2
+    echo "  2) Daily        - Every day at 2:00 AM" >&2
+    echo "  3) Weekly       - Every Sunday at 2:00 AM" >&2
+    echo "  4) Monthly      - First day of month at 2:00 AM" >&2
+    echo "  5) Custom       - Enter custom cron format" >&2
+    echo "" >&2
     read -p "Choose [1-5]: " choice
     
     case $choice in
@@ -226,18 +226,18 @@ select_time_period() {
         3) echo "weekly" ;;
         4) echo "monthly" ;;
         5)
-            echo ""
-            echo "Cron format: minute hour day month weekday"
-            echo "Examples:"
-            echo "  '*/30 * * * *'  - Every 30 minutes"
-            echo "  '0 */6 * * *'   - Every 6 hours"
-            echo "  '0 9 * * 1-5'   - Weekdays at 9 AM"
-            echo ""
+            echo "" >&2
+            echo "Cron format: minute hour day month weekday" >&2
+            echo "Examples:" >&2
+            echo "  '*/30 * * * *'  - Every 30 minutes" >&2
+            echo "  '0 */6 * * *'   - Every 6 hours" >&2
+            echo "  '0 9 * * 1-5'   - Weekdays at 9 AM" >&2
+            echo "" >&2
             read -p "Enter cron schedule: " custom_cron
             echo "$custom_cron"
             ;;
         *)
-            echo "Invalid choice"
+            echo "Invalid choice" >&2
             return 1
             ;;
     esac
@@ -394,6 +394,11 @@ start_backup(){
             if [[ -z "$time_period" ]]; then
                 return 1
             fi
+        fi
+        
+        if [[ -z "$backup_count" ]] || [[ "$backup_count" == "5" ]]; then
+            read -p "Number of backups to keep (default: 5): " input_count
+            backup_count="${input_count:-5}"
         fi
     fi
     
