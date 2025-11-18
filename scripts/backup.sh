@@ -142,6 +142,25 @@ create_backup_script_template() {
         return 1
     fi
     
+    local backup_name="$(basename "$source_dir")"
+    
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        while IFS='|' read -r name source output script schedule count; do
+            if [[ "$source" == "$source_dir" ]] && [[ "$output" == "$output_dir" ]]; then
+                log_error "Backup with same source and output already exists: $name"
+                echo "Use 'backup update $name' to modify it"
+                return 1
+            fi
+        done < "${CONFIG_FILE}"
+        
+        local index=1
+        local original_name="$backup_name"
+        while get_backup_config "$backup_name" >/dev/null 2>&1; do
+            backup_name="${original_name}-${index}"
+            ((index++))
+        done
+    fi
+    
     if [[ ! -d "$output_dir" ]]; then
         log_info "Creating output directory: $output_dir"
         mkdir -p "$output_dir" || {
@@ -179,8 +198,13 @@ echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
 if tar -czf "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Backup completed: $(du -h "$BACKUP_FILE" | cut -f1)"
     
-    KEEP_FROM=$((BACKUP_COUNT + 1))
-    ls -t "${OUTPUT}"/$(basename "$SOURCE")_*.tar.gz 2>/dev/null | tail -n +${KEEP_FROM} | xargs rm -f 2>/dev/null
+    BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*.tar.gz 2>/dev/null))
+    if [[ ${#BACKUP_FILES[@]} -gt $BACKUP_COUNT ]]; then
+        for ((i=$BACKUP_COUNT; i<${#BACKUP_FILES[@]}; i++)); do
+            rm -f "${BACKUP_FILES[$i]}"
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed old backup: $(basename "${BACKUP_FILES[$i]}")"
+        done
+    fi
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Backup failed"
     exit 1
