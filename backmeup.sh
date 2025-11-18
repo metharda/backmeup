@@ -35,7 +35,7 @@ command(){
             exec /usr/local/bin/backup.sh "$command" "$@"
             ;;
         "help")
-            show_usage()
+            show_usage
             ;;
         *)
             echo "Unknown command: $1, use 'help' to see available commands."
