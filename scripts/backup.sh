@@ -122,6 +122,7 @@ create_backup_script_template() {
     local output_dir="$(expand_path "$2")"
     local time_period="$3"
     local backup_count="${4:-5}"
+    local backup_name="${5:-$(basename "$source_dir")}"
     
     if [[ -z "$source_dir" ]]; then
         log_error "Source directory is required"
@@ -142,25 +143,6 @@ create_backup_script_template() {
         return 1
     fi
     
-    local backup_name="$(basename "$source_dir")"
-    
-    if [[ -f "${CONFIG_FILE}" ]]; then
-        while IFS='|' read -r name source output script schedule count; do
-            if [[ "$source" == "$source_dir" ]] && [[ "$output" == "$output_dir" ]]; then
-                log_error "Backup with same source and output already exists: $name"
-                echo "Use 'backup update $name' to modify it"
-                return 1
-            fi
-        done < "${CONFIG_FILE}"
-        
-        local index=1
-        local original_name="$backup_name"
-        while get_backup_config "$backup_name" >/dev/null 2>&1; do
-            backup_name="${original_name}-${index}"
-            ((index++))
-        done
-    fi
-    
     if [[ ! -d "$output_dir" ]]; then
         log_info "Creating output directory: $output_dir"
         mkdir -p "$output_dir" || {
@@ -178,8 +160,7 @@ create_backup_script_template() {
         }
     fi
     
-    local source_basename=$(basename "$source_dir")
-    local script_name="backup_${source_basename}.sh"
+    local script_name="backup_${backup_name}.sh"
     local script_path="${backmeup_dir}/${script_name}"
     
     log_info "Creating backup script: $script_path"
@@ -216,7 +197,7 @@ TEMPLATE_EOF
     sed -i.bak "s|BACKUP_COUNT_PLACEHOLDER|$backup_count|g" "$script_path"
     rm -f "${script_path}.bak"
     chmod +x "$script_path"
-    save_backup_config "$(basename "$source_dir")" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count"
+    save_backup_config "$backup_name" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count"
     log_success "Backup script created: $script_path"
     SCRIPT_PATH="$script_path"
 }
@@ -364,14 +345,34 @@ start_backup(){
         return 1
     fi
     
+    if [[ -f "${CONFIG_FILE}" ]]; then
+        while IFS='|' read -r name source output script schedule count; do
+            if [[ "$source" == "$directory" ]] && [[ "$output" == "$output_dir" ]]; then
+                log_error "Backup with same source and output already exists: $name"
+                echo "Use 'backup update $name' to modify it"
+                return 1
+            fi
+        done < "${CONFIG_FILE}"
+    fi
+    
+    local backup_name="$(basename "$directory")"
+    local index=1
+    local original_name="$backup_name"
+    while get_backup_config "$backup_name" >/dev/null 2>&1; do
+        backup_name="${original_name}-${index}"
+        ((index++))
+    done
+    
     echo ""
     log_info "Starting backup setup..."
+    log_info "Backup name: $backup_name"
+    log_info "Backup name: $backup_name"
     log_info "Source: $directory"
     log_info "Destination: $output_dir"
     log_info "Schedule: $time_period"
     echo ""
     
-    create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count"
+    create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count" "$backup_name"
     
     if [[ $? -eq 0 ]] && [[ -n "$SCRIPT_PATH" ]]; then
         setup_cron_job "$SCRIPT_PATH" "$time_period"
