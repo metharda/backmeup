@@ -7,8 +7,7 @@
 
 </div>
 
-
-BackMeUp is a simple yet powerful backup automation tool that helps you schedule and manage directory backups with ease. It provides an intuitive CLI interface, automatic rotation, and flexible scheduling options through cron integration.
+BackMeUp is a simple yet powerful backup automation tool that helps you schedule and manage directory backups with ease. It provides an intuitive CLI interface, automatic rotation, flexible scheduling options, and remote backup support via SSH.
 
 ## Features
 
@@ -18,18 +17,26 @@ BackMeUp is a simple yet powerful backup automation tool that helps you schedule
 - Multi-destination support for the same source
 - Multiple compression formats (tar.gz, zip, tar.bz2, tar.xz)
 
+**Remote Backup Support**
+- SSH-based remote transfers
+- Local-only, remote-only, or both backup modes
+- Interactive SSH key setup and authentication
+- Automatic host key management
+- Optional local cleanup after remote transfer
+
 **Flexible Scheduling**
 - Preset schedules (hourly, daily, weekly, monthly)
 - Custom cron expressions for advanced scheduling
 - Easy schedule updates without recreating backups
 
 **Organized Storage**
-- Hidden `.backmeup` directory for scripts
+- Scripts stored in source directory's `.backmeup` folder
 - Timestamped backup archives
 - Automatic cleanup of old backups
+- `.backmeup` excluded from backups automatically
 
 **User-Friendly Interface**
-- Interactive mode for guided setup
+- Interactive mode with step-by-step guidance
 - Flag-based CLI for automation
 - Comprehensive backup listing and management
 
@@ -75,19 +82,41 @@ Verify the installation:
 backmeup help
 ```
 
+## Quick Start
+
+### Interactive Mode
+
+The easiest way to create your first backup:
+
+```bash
+backmeup backup start -i
+```
+
+Follow the prompts to configure:
+1. Source directory to backup
+2. Backup type (local/remote/both)
+3. Destination directory or remote server
+4. Compression format
+5. Backup schedule
+6. Number of backups to keep
+
+### Command Line Mode
+
+Create a backup with a single command:
+
+```bash
+backmeup backup start -d ~/Documents -o ~/Backups -t daily -b 7 -c tar.gz
+```
+
 ## Uninstallation
 
 ### Using Command
-
-The easiest way to uninstall:
 
 ```bash
 backmeup uninstall
 ```
 
 ### Direct Script
-
-Or run the uninstaller directly:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/metharda/backmeup/main/scripts/uninstall.sh | bash
@@ -99,44 +128,6 @@ The uninstaller will:
 - Optionally remove backup configurations
 - Clean up `.backmeup` directories
 - Remove associated cron jobs
-
-You'll be prompted to confirm each step.
-git clone https://github.com/metharda/backmeup.git
-cd backmeup
-chmod +x backmeup.sh scripts/*.sh
-```
-
-### Add to PATH (Optional)
-
-```bash
-sudo ln -s "$(pwd)/backmeup.sh" /usr/local/bin/backmeup
-```
-
-## Quick Start
-
-### Interactive Mode
-
-The easiest way to create your first backup:
-
-```bash
-./backmeup.sh backup start -i
-```
-
-Follow the prompts to configure:
-1. Source directory to backup
-2. Destination directory
-3. Backup schedule
-3. Backup schedule
-4. Number of backups to keep
-5. Compression method
-
-### Command Line Mode
-
-Create a backup with a single command:
-
-```bash
-./backmeup.sh backup start -d ~/Documents -o ~/Backups -t daily -b 7 -c tar.gz
-```
 
 ## Usage
 
@@ -180,7 +171,17 @@ backmeup backup <command> [options]
 Create a daily backup of your documents:
 
 ```bash
-./backmeup.sh backup start -d ~/Documents -o ~/Backups -t daily
+backmeup backup start -d ~/Documents -o ~/Backups -t daily
+```
+
+### Remote Backup
+
+Interactive mode with remote backup:
+
+```bash
+backmeup backup start -i
+# Choose option 2 (Remote only) or 3 (Both)
+# Follow prompts for SSH configuration
 ```
 
 ### Multiple Backups of Same Source
@@ -188,11 +189,11 @@ Create a daily backup of your documents:
 Backup documents to multiple locations with different schedules:
 
 ```bash
-# Daily backup to external drive
-./backmeup.sh backup start -d ~/Documents -o /mnt/external/backups -t daily
+# Daily backup to local drive
+backmeup backup start -d ~/Documents -o ~/Backups -t daily
 
-# Weekly backup to NAS
-./backmeup.sh backup start -d ~/Documents -o /mnt/nas/backups -t weekly
+# Weekly backup to external drive
+backmeup backup start -d ~/Documents -o /mnt/external/backups -t weekly
 ```
 
 These will create `Documents` and `Documents-1` backups automatically.
@@ -202,7 +203,7 @@ These will create `Documents` and `Documents-1` backups automatically.
 Backup every 6 hours:
 
 ```bash
-./backmeup.sh backup start -d ~/Projects -o ~/Backups -t "0 */6 * * *"
+backmeup backup start -d ~/Projects -o ~/Backups -t "0 */6 * * *"
 ```
 
 ### High-Retention Backup
@@ -210,7 +211,7 @@ Backup every 6 hours:
 Keep 30 backups for critical data:
 
 ```bash
-./backmeup.sh backup start -d ~/Important -o ~/Archives -t daily -b 30
+backmeup backup start -d ~/Important -o ~/Archives -t daily -b 30
 ```
 
 ### Different Compression Formats
@@ -218,7 +219,7 @@ Keep 30 backups for critical data:
 Use `zip` for compatibility or `tar.xz` for better compression:
 
 ```bash
-./backmeup.sh backup start -d ~/Photos -o ~/Backups -t weekly -c tar.xz
+backmeup backup start -d ~/Photos -o ~/Backups -t weekly -c tar.xz
 ```
 
 ### Update Existing Backup
@@ -227,19 +228,19 @@ Change schedule or retention:
 
 ```bash
 # Update schedule
-./backmeup.sh backup update Documents -t weekly
+backmeup backup update Documents -t weekly
 
 # Update retention count
-./backmeup.sh backup update Documents -b 15
+backmeup backup update Documents -b 15
 
 # Update both
-./backmeup.sh backup update Documents -t monthly -b 20
+backmeup backup update Documents -t monthly -b 20
 ```
 
 ### List All Backups
 
 ```bash
-./backmeup.sh backup list
+backmeup backup list
 ```
 
 Output:
@@ -252,7 +253,7 @@ Output:     /home/user/Backups
 Schedule:   daily
 Keep:       7 backups
 Format:     tar.gz
-Script:     /home/user/Backups/.backmeup/backup_Documents.sh
+Script:     /home/user/Documents/.backmeup/backup_Documents.sh
 ---
 ```
 
@@ -261,7 +262,7 @@ Script:     /home/user/Backups/.backmeup/backup_Documents.sh
 Remove backup configuration and cron job:
 
 ```bash
-./backmeup.sh backup delete Documents
+backmeup backup delete Documents
 ```
 
 ### Run Manual Backup
@@ -269,7 +270,15 @@ Remove backup configuration and cron job:
 Execute a backup immediately without waiting for schedule:
 
 ```bash
-/path/to/output/.backmeup/backup_Documents.sh
+/path/to/source/.backmeup/backup_Documents.sh
+```
+
+### Test Installation
+
+Run the test suite:
+
+```bash
+backmeup test
 ```
 
 ## File Structure
@@ -279,17 +288,25 @@ backmeup/
 ├── backmeup.sh              # Main entry point
 ├── scripts/
 │   ├── backup.sh            # Core backup logic
-│   └── cron.sh             # Cron management
+│   ├── cron.sh              # Cron management
+│   ├── ssh_utils.sh         # SSH utilities
+│   ├── install.sh           # Installer
+│   └── uninstall.sh         # Uninstaller
+├── test/
+│   └── test.sh              # Test suite
 └── README.md
 
 User files:
 ~/.config/backmeup/
-└── backups.conf            # Backup configurations
+└── backups.conf             # Backup configurations
+
+Source directory:
+~/Documents/
+└── .backmeup/
+    └── backup_Documents.sh  # Generated backup script
 
 Output directory:
 ~/Backups/
-├── .backmeup/              # Hidden scripts directory
-│   └── backup_Documents.sh # Generated backup script
 ├── Documents_20241118_140523.tar.gz
 ├── Documents_20241117_140502.tar.gz
 └── ...
@@ -298,10 +315,11 @@ Output directory:
 ## How It Works
 
 1. **Configuration**: BackMeUp stores backup metadata in `~/.config/backmeup/backups.conf`
-2. **Script Generation**: Creates executable backup scripts in the output directory's `.backmeup` folder
+2. **Script Generation**: Creates executable backup scripts in the source directory's `.backmeup` folder
 3. **Cron Integration**: Automatically adds cron jobs with descriptive markers
-4. **Execution**: Cron runs the backup script, which creates timestamped archives
+4. **Execution**: Cron runs the backup script, which creates timestamped archives (excluding `.backmeup`)
 5. **Rotation**: Automatically removes old backups based on retention count
+6. **Remote Transfer** (optional): Transfers backups to remote server via SSH/SCP
 
 ## Backup Format
 
@@ -316,8 +334,9 @@ Example: `Documents_20241118_140523.tar.gz` or `Photos_20241118_140523.zip`
 
 - **OS**: Linux (Ubuntu, Debian, CentOS, etc.)
 - **Shell**: Bash 4.0+
-- **Tools**: tar, gzip, cron (optional: zip, bzip2, xz)
+- **Tools**: tar, gzip, cron
 - **Optional**: zip, bzip2, xz (for additional compression formats)
+- **Remote Backups**: ssh, scp, ssh-keygen, ssh-copy-id
 - **Permissions**: Write access to source and destination directories
 
 ## Troubleshooting
@@ -333,14 +352,14 @@ crontab -l | grep -i backmeup
 
 Check if the backup script exists and is executable:
 ```bash
-ls -la ~/Backups/.backmeup/
+ls -la ~/Documents/.backmeup/
 ```
 
 ### Test Manual Execution
 
 Run a backup script manually to check for errors:
 ```bash
-bash -x ~/Backups/.backmeup/backup_Documents.sh
+bash -x ~/Documents/.backmeup/backup_Documents.sh
 ```
 
 ### View Configuration
@@ -350,7 +369,25 @@ Check your backup configurations:
 cat ~/.config/backmeup/backups.conf
 ```
 
+### SSH Connection Issues
+
+Test SSH connection manually:
+```bash
+ssh -v user@host
+```
+
+Check SSH key:
+```bash
+ls -la ~/.ssh/
+```
+
+### Run Tests
+
+Execute the test suite:
+```bash
+backmeup test
+```
 
 <div align="center">
-a small backup script
+A simple backup script for Linux
 </div>
