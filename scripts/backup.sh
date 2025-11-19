@@ -126,73 +126,53 @@ validate_directory() {
     return 0
 }
 
-check_and_install_tool() {
-    local tool="$1"
-    
-    if ! command -v "$tool" &> /dev/null; then
-        log_warning "Compression tool '$tool' not found."
-        if [[ "$OSTYPE" == "darwin"* ]]; then
-            if command -v brew &> /dev/null; then
-                read -p "Do you want to install '$tool' using Homebrew? [y/N] " response
-                if [[ "$response" =~ ^[Yy]$ ]]; then
-                    log_info "Installing $tool..."
-                    brew install "$tool"
-                else
-                    log_error "Tool '$tool' is required but not installed."
-                    return 1
-                fi
-            else
-                log_error "Homebrew not found. Please install '$tool' manually."
-                return 1
-            fi
-        else
-            log_error "Please install '$tool' manually."
-            return 1
-        fi
-    fi
-    return 0
-}
-
 check_compression_tool() {
     local compression="$1"
     local tool_name=""
-    local install_cmd=""
+    local package_name=""
     
     case "$compression" in
         "tar.gz")
             tool_name="gzip"
-            if ! command -v gzip &>/dev/null; then
-                install_cmd="sudo apt-get install gzip"
-            fi
+            package_name="gzip"
             ;;
         "tar.bz2")
             tool_name="bzip2"
-            if ! command -v bzip2 &>/dev/null; then
-                install_cmd="sudo apt-get install bzip2"
-            fi
+            package_name="bzip2"
             ;;
         "tar.xz")
             tool_name="xz"
-            if ! command -v xz &>/dev/null; then
-                install_cmd="sudo apt-get install xz-utils"
-            fi
+            package_name="xz-utils"
             ;;
         "zip")
             tool_name="zip"
-            if ! command -v zip &>/dev/null; then
-                install_cmd="sudo apt-get install zip"
-            fi
+            package_name="zip"
             ;;
     esac
     
-    if [[ -n "$install_cmd" ]]; then
+    if ! type "$tool_name" >/dev/null 2>&1; then
         log_warning "Compression tool '$tool_name' is not installed."
         echo ""
         read -p "Would you like to install it now? (y/n): " choice
-        if [[ "$choice" == "y" ]] || [[ "$choice" == "Y" ]]; then
+        if [[ "$choice" =~ ^[Yy]$ ]]; then
             log_info "Installing $tool_name..."
-            eval "$install_cmd"
+            
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get update && sudo apt-get install -y "$package_name"
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y "$package_name"
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y "$package_name"
+            else
+                log_error "No supported package manager found. Please install '$tool_name' manually."
+                return 1
+            fi
+            
             if [[ $? -eq 0 ]]; then
+                if ! type "$tool_name" >/dev/null 2>&1; then
+                    log_error "Installation reported success but $tool_name is still not available"
+                    return 1
+                fi
                 log_success "$tool_name installed successfully"
             else
                 log_error "Failed to install $tool_name"
@@ -275,12 +255,8 @@ create_backup_script_template() {
     
     log_info "Creating backup script: $script_path"
     
-    local tool_cmd="tar"
-    if [[ "$compression_method" == "zip" ]]; then
-        tool_cmd="zip"
-    fi
-    
-    if ! check_and_install_tool "$tool_cmd"; then
+    if ! check_compression_tool "$compression_method"; then
+        log_error "Compression tool check failed - aborting"
         return 1
     fi
     
@@ -643,10 +619,6 @@ start_backup(){
     fi
     echo ""
     
-    if ! check_compression_tool "$compression_method"; then
-        return 1
-    fi
-    
     create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count" "$backup_name" "$compression_method" "$remote_enabled" "$remote_user" "$remote_host" "$remote_path" "$delete_after"
     
     if [[ $? -eq 0 ]] && [[ -n "$SCRIPT_PATH" ]]; then
@@ -829,20 +801,55 @@ restore_backup() {
     fi
     
     local cmd=""
+    local compression_type=""
+    
     if [[ "$backup_file" =~ \.zip$ ]]; then
         cmd="unzip -o"
-        if ! check_and_install_tool "unzip"; then
-            return 1
-        fi
+        compression_type="zip"
     elif [[ "$backup_file" =~ \.tar\.gz$ ]] || [[ "$backup_file" =~ \.tgz$ ]]; then
         cmd="tar -xzf"
+        compression_type="tar.gz"
     elif [[ "$backup_file" =~ \.tar\.bz2$ ]]; then
         cmd="tar -xjf"
+        compression_type="tar.bz2"
     elif [[ "$backup_file" =~ \.tar\.xz$ ]]; then
         cmd="tar -xJf"
+        compression_type="tar.xz"
     else
         log_error "Unsupported backup file format. Supported: .tar.gz, .zip, .tar.bz2, .tar.xz"
         return 1
+    fi
+    
+    if ! check_compression_tool "$compression_type"; then
+        return 1
+    fi
+    
+    # Special check for unzip if it's a zip file
+    if [[ "$compression_type" == "zip" ]] && ! command -v unzip &>/dev/null; then
+        log_warning "unzip tool not found."
+        read -p "Would you like to install it now? (y/n): " choice
+        if [[ "$choice" == "y" ]] || [[ "$choice" == "Y" ]]; then
+            log_info "Installing unzip..."
+            if command -v apt-get &>/dev/null; then
+                sudo apt-get update && sudo apt-get install -y unzip
+            elif command -v yum &>/dev/null; then
+                sudo yum install -y unzip
+            elif command -v dnf &>/dev/null; then
+                sudo dnf install -y unzip
+            else
+                log_error "No supported package manager found. Please install 'unzip' manually."
+                return 1
+            fi
+            
+            if [[ $? -ne 0 ]]; then
+                log_error "Failed to install unzip"
+                return 1
+            fi
+            log_success "unzip installed successfully"
+        else
+            log_error "Cannot restore backup without unzip"
+            return 1
+        fi
     fi
     
     local backup_size=$(du -h "$backup_file" | cut -f1)
@@ -947,11 +954,7 @@ create_onetime_backup() {
         }
     fi
     
-    local tool_cmd="tar"
-    if [[ "$compression_method" == "zip" ]]; then
-        tool_cmd="zip"
-    fi
-    if ! check_and_install_tool "$tool_cmd"; then
+    if ! check_compression_tool "$compression_method"; then
         return 1
     fi
     
