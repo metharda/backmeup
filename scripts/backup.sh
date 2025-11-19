@@ -32,10 +32,11 @@ save_backup_config() {
     local script_path="$4"
     local time_period="$5"
     local backup_count="$6"
+    local compression_method="${7:-tar.gz}"
     
     init_config
     
-    echo "${backup_name}|${source_dir}|${output_dir}|${script_path}|${time_period}|${backup_count}" >> "${CONFIG_FILE}"
+    echo "${backup_name}|${source_dir}|${output_dir}|${script_path}|${time_period}|${backup_count}|${compression_method}" >> "${CONFIG_FILE}"
 }
 
 get_backup_config() {
@@ -70,12 +71,13 @@ list_backups() {
     echo "=== Configured Backups ==="
     echo ""
     
-    while IFS='|' read -r name source output script schedule count; do
+    while IFS='|' read -r name source output script schedule count compression; do
         echo "Name:       $name"
         echo "Source:     $source"
         echo "Output:     $output"
         echo "Schedule:   $schedule"
         echo "Keep:       $count backups"
+        echo "Format:     ${compression:-tar.gz}"
         echo "Script:     $script"
         echo "---"
     done < "${CONFIG_FILE}"
@@ -105,6 +107,33 @@ validate_directory() {
     return 0
 }
 
+check_and_install_tool() {
+    local tool="$1"
+    
+    if ! command -v "$tool" &> /dev/null; then
+        log_warning "Compression tool '$tool' not found."
+        if [[ "$OSTYPE" == "darwin"* ]]; then
+            if command -v brew &> /dev/null; then
+                read -p "Do you want to install '$tool' using Homebrew? [y/N] " response
+                if [[ "$response" =~ ^[Yy]$ ]]; then
+                    log_info "Installing $tool..."
+                    brew install "$tool"
+                else
+                    log_error "Tool '$tool' is required but not installed."
+                    return 1
+                fi
+            else
+                log_error "Homebrew not found. Please install '$tool' manually."
+                return 1
+            fi
+        else
+            log_error "Please install '$tool' manually."
+            return 1
+        fi
+    fi
+    return 0
+}
+
 show_usage() {
 cat << 'EOF'
 Usage: backup.sh <command> [options]
@@ -125,6 +154,7 @@ create_backup_script_template() {
     local time_period="$3"
     local backup_count="${4:-5}"
     local backup_name="${5:-$(basename "$source_dir")}"
+    local compression_method="${6:-tar.gz}"
     
     if [[ -z "$source_dir" ]]; then
         log_error "Source directory is required"
@@ -167,21 +197,62 @@ create_backup_script_template() {
     
     log_info "Creating backup script: $script_path"
     
+    local tool_cmd="tar"
+    if [[ "$compression_method" == "zip" ]]; then
+        tool_cmd="zip"
+    fi
+    
+    if ! check_and_install_tool "$tool_cmd"; then
+        return 1
+    fi
+    
 cat > "$script_path" << 'TEMPLATE_EOF'
 #!/usr/bin/env bash
 
 SOURCE="SOURCE_DIR_PLACEHOLDER"
 OUTPUT="OUTPUT_DIR_PLACEHOLDER"
 BACKUP_COUNT="BACKUP_COUNT_PLACEHOLDER"
+COMPRESSION="COMPRESSION_METHOD_PLACEHOLDER"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
-BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}.tar.gz"
+
+# Determine extension and command
+case $COMPRESSION in
+    "zip")
+        EXT=".zip"
+        CMD="zip -r"
+        ;;
+    "tar.bz2")
+        EXT=".tar.bz2"
+        CMD="tar -cjf"
+        ;;
+    "tar.xz")
+        EXT=".tar.xz"
+        CMD="tar -cJf"
+        ;;
+    *)
+        EXT=".tar.gz"
+        CMD="tar -czf"
+        ;;
+esac
+
+BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}${EXT}"
 
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
 
-if tar -czf "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null; then
+# Execute backup
+if [[ "$COMPRESSION" == "zip" ]]; then
+    # zip needs special handling for directory
+    cd "$(dirname "$SOURCE")" && $CMD "$BACKUP_FILE" "$(basename "$SOURCE")" >/dev/null
+else
+    $CMD "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null
+fi
+
+if [[ $? -eq 0 ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Backup completed: $(du -h "$BACKUP_FILE" | cut -f1)"
     
-    BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*.tar.gz 2>/dev/null))
+    # Cleanup old backups
+    # Note: We need to be careful to only delete files with the same extension
+    BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*${EXT} 2>/dev/null))
     if [[ ${#BACKUP_FILES[@]} -gt $BACKUP_COUNT ]]; then
         for ((i=$BACKUP_COUNT; i<${#BACKUP_FILES[@]}; i++)); do
             rm -f "${BACKUP_FILES[$i]}"
@@ -197,9 +268,10 @@ TEMPLATE_EOF
     sed -i.bak "s|SOURCE_DIR_PLACEHOLDER|$source_dir|g" "$script_path"
     sed -i.bak "s|OUTPUT_DIR_PLACEHOLDER|$output_dir|g" "$script_path"
     sed -i.bak "s|BACKUP_COUNT_PLACEHOLDER|$backup_count|g" "$script_path"
+    sed -i.bak "s|COMPRESSION_METHOD_PLACEHOLDER|$compression_method|g" "$script_path"
     rm -f "${script_path}.bak"
     chmod +x "$script_path"
-    save_backup_config "$backup_name" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count"
+    save_backup_config "$backup_name" "$source_dir" "$output_dir" "$script_path" "$time_period" "$backup_count" "$compression_method"
     log_success "Backup script created: $script_path"
     SCRIPT_PATH="$script_path"
 }
@@ -251,11 +323,35 @@ select_time_period() {
     esac
 }
 
+select_compression_method() {
+    local choice
+    echo "" >&2
+    echo "Select compression method:" >&2
+    echo "  1) tar.gz (Default) - Good balance of speed and size" >&2
+    echo "  2) zip              - Widely supported" >&2
+    echo "  3) tar.bz2          - Better compression, slower" >&2
+    echo "  4) tar.xz           - Best compression, slowest" >&2
+    echo "" >&2
+    read -p "Choose [1-4] (default: 1): " choice
+    
+    case $choice in
+        1|"") echo "tar.gz" ;;
+        2) echo "zip" ;;
+        3) echo "tar.bz2" ;;
+        4) echo "tar.xz" ;;
+        *)
+            echo "Invalid choice, defaulting to tar.gz" >&2
+            echo "tar.gz"
+            ;;
+    esac
+}
+
 start_backup(){
     local directory=""
     local output_dir=""
     local time_period=""
     local backup_count="5"
+    local compression_method="tar.gz"
     local interactive=false
     
     if [[ $# -eq 0 ]]; then
@@ -278,6 +374,10 @@ start_backup(){
                 ;;
             -b|--backup-count)
                 backup_count="$2"
+                shift 2
+                ;;
+            -c|--compression)
+                compression_method="$2"
                 shift 2
                 ;;
             -i|--interactive)
@@ -317,6 +417,10 @@ start_backup(){
             read -p "Number of backups to keep (default: 5): " input_count
             backup_count="${input_count:-5}"
         fi
+        
+        if [[ -z "$compression_method" ]] || [[ "$compression_method" == "tar.gz" ]]; then
+            compression_method=$(select_compression_method)
+        fi
     fi
     
     if [[ -z "$directory" ]] || [[ -z "$output_dir" ]] || [[ -z "$time_period" ]]; then
@@ -329,6 +433,7 @@ start_backup(){
         echo "  -o, --output <path>        Backup destination directory"
         echo "  -t, --time-period <time>   Schedule (hourly/daily/weekly/monthly/cron)"
         echo "  -b, --backup-count <num>   Number of backups to keep (default: 5)"
+        echo "  -c, --compression <type>   Compression method (tar.gz/zip/tar.bz2/tar.xz)"
         echo "  -i, --interactive          Interactive mode"
         echo ""
         echo "Examples:"
@@ -371,10 +476,12 @@ start_backup(){
     log_info "Backup name: $backup_name"
     log_info "Source: $directory"
     log_info "Destination: $output_dir"
+    log_info "Destination: $output_dir"
     log_info "Schedule: $time_period"
+    log_info "Compression: $compression_method"
     echo ""
     
-    create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count" "$backup_name"
+    create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count" "$backup_name" "$compression_method"
     
     if [[ $? -eq 0 ]] && [[ -n "$SCRIPT_PATH" ]]; then
         setup_cron_job "$SCRIPT_PATH" "$time_period"
@@ -388,6 +495,7 @@ start_backup(){
         echo " Source:       $directory"
         echo " Destination:  $output_dir"
         echo " Schedule:     $time_period"
+        echo " Format:       $compression_method"
         echo " Script:       $SCRIPT_PATH"
         echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
@@ -526,7 +634,7 @@ restore_backup() {
         echo "Usage: backup.sh restore [OPTIONS]"
         echo ""
         echo "Options:"
-        echo "  -f, --file <path>          Backup archive file (.tar.gz)"
+        echo "  -f, --file <path>          Backup archive file"
         echo "  -o, --output <path>        Restore destination directory"
         echo ""
         echo "Example:"
@@ -543,17 +651,29 @@ restore_backup() {
         return 1
     fi
     
-    if [[ ! "$backup_file" =~ \.tar\.gz$ ]]; then
-        log_error "Backup file must be a .tar.gz archive"
-        return 1
-    fi
-    
     if [[ ! -d "$output_dir" ]]; then
         log_info "Creating output directory: $output_dir"
         mkdir -p "$output_dir" || {
             log_error "Failed to create output directory"
             return 1
         }
+    fi
+    
+    local cmd=""
+    if [[ "$backup_file" =~ \.zip$ ]]; then
+        cmd="unzip -o"
+        if ! check_and_install_tool "unzip"; then
+            return 1
+        fi
+    elif [[ "$backup_file" =~ \.tar\.gz$ ]] || [[ "$backup_file" =~ \.tgz$ ]]; then
+        cmd="tar -xzf"
+    elif [[ "$backup_file" =~ \.tar\.bz2$ ]]; then
+        cmd="tar -xjf"
+    elif [[ "$backup_file" =~ \.tar\.xz$ ]]; then
+        cmd="tar -xJf"
+    else
+        log_error "Unsupported backup file format. Supported: .tar.gz, .zip, .tar.bz2, .tar.xz"
+        return 1
     fi
     
     local backup_size=$(du -h "$backup_file" | cut -f1)
@@ -567,7 +687,19 @@ restore_backup() {
     echo ""
     
     log_info "Extracting archive..."
-    if tar -xzf "$backup_file" -C "$output_dir" 2>&1; then
+    local success=false
+    
+    if [[ "$backup_file" =~ \.zip$ ]]; then
+        if $cmd "$backup_file" -d "$output_dir" >/dev/null; then
+            success=true
+        fi
+    else
+        if $cmd "$backup_file" -C "$output_dir" 2>/dev/null; then
+            success=true
+        fi
+    fi
+    
+    if [[ "$success" == true ]]; then
         echo ""
         log_success "Restore completed successfully!"
         echo ""
@@ -590,6 +722,7 @@ restore_backup() {
 create_onetime_backup() {
     local directory=""
     local output_dir=""
+    local compression_method="tar.gz"
     
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -599,6 +732,10 @@ create_onetime_backup() {
                 ;;
             -o|--output)
                 output_dir="$2"
+                shift 2
+                ;;
+            -c|--compression)
+                compression_method="$2"
                 shift 2
                 ;;
             *)
@@ -616,6 +753,7 @@ create_onetime_backup() {
         echo "Options:"
         echo "  -d, --directory <path>     Source directory to backup"
         echo "  -o, --output <path>        Backup destination directory"
+        echo "  -c, --compression <type>   Compression method (tar.gz/zip/tar.bz2/tar.xz)"
         echo ""
         echo "Example:"
         echo "  backup.sh create -d ~/Documents -o ~/Backups"
@@ -638,13 +776,48 @@ create_onetime_backup() {
         }
     fi
     
+    local tool_cmd="tar"
+    if [[ "$compression_method" == "zip" ]]; then
+        tool_cmd="zip"
+    fi
+    if ! check_and_install_tool "$tool_cmd"; then
+        return 1
+    fi
+    
     local timestamp=$(date +"%Y%m%d_%H%M%S")
-    local backup_file="${output_dir}/$(basename "$directory")_${timestamp}.tar.gz"
+    local ext=".tar.gz"
+    local cmd="tar -czf"
+    
+    case $compression_method in
+        "zip")
+            ext=".zip"
+            cmd="zip -r"
+            ;;
+        "tar.bz2")
+            ext=".tar.bz2"
+            cmd="tar -cjf"
+            ;;
+        "tar.xz")
+            ext=".tar.xz"
+            cmd="tar -cJf"
+            ;;
+        "tar.gz")
+            ext=".tar.gz"
+            cmd="tar -czf"
+            ;;
+        *)
+            log_error "Unsupported compression method: $compression_method"
+            return 1
+            ;;
+    esac
+    
+    local backup_file="${output_dir}/$(basename "$directory")_${timestamp}${ext}"
     
     echo ""
     log_info "Creating one-time backup..."
     log_info "Source: $directory"
     log_info "Destination: $backup_file"
+    log_info "Compression: $compression_method"
     
     log_info "Calculating directory size..."
     local dir_size=$(du -sh "$directory" 2>/dev/null | cut -f1)
@@ -653,7 +826,18 @@ create_onetime_backup() {
     echo ""
     
     log_info "Creating backup archive..."
-    if tar -czf "$backup_file" -C "$(dirname "$directory")" "$(basename "$directory")" 2>&1; then
+    local success=false
+    if [[ "$compression_method" == "zip" ]]; then
+        if cd "$(dirname "$directory")" && $cmd "$backup_file" "$(basename "$directory")" >/dev/null; then
+            success=true
+        fi
+    else
+        if $cmd "$backup_file" -C "$(dirname "$directory")" "$(basename "$directory")" 2>/dev/null; then
+            success=true
+        fi
+    fi
+    
+    if [[ "$success" == true ]]; then
         local backup_size=$(du -h "$backup_file" | cut -f1)
         echo ""
         log_success "Backup completed successfully!"
