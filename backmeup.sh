@@ -61,10 +61,11 @@ handle_command() {
             shift
             source "${SCRIPT_DIR}/backup.sh"
             if [[ $# -eq 0 ]]; then
-                start_backup
-            else
-                start_backup "$@"
+                echo "Error: backup command requires a subcommand"
+                echo "Usage: backmeup backup <start|update|delete|list|create|restore|help>"
+                exit 1
             fi
+            command "$@"
             ;;
         test)
             if [[ -f "${SCRIPT_DIR}/../test/test.sh" ]]; then
