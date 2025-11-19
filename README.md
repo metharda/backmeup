@@ -16,6 +16,7 @@ BackMeUp is a simple yet powerful backup automation tool that helps you schedule
 - Automatic backup rotation with configurable retention
 - Duplicate detection and prevention
 - Multi-destination support for the same source
+- Multiple compression formats (tar.gz, zip, tar.bz2, tar.xz)
 
 **Flexible Scheduling**
 - Preset schedules (hourly, daily, weekly, monthly)
@@ -62,17 +63,17 @@ Follow the prompts to configure:
 1. Source directory to backup
 2. Destination directory
 3. Backup schedule
+3. Backup schedule
 4. Number of backups to keep
+5. Compression method
 
 ### Command Line Mode
 
 Create a backup with a single command:
 
 ```bash
-./backmeup.sh backup start -d ~/Documents -o ~/Backups -t daily -b 7
+./backmeup.sh backup start -d ~/Documents -o ~/Backups -t daily -b 7 -c tar.gz
 ```
-
-This creates a daily backup of `~/Documents` to `~/Backups`, keeping the 7 most recent backups.
 
 ## Usage
 
@@ -96,7 +97,8 @@ backmeup backup <command> [options]
 | `-d, --directory` | Source directory to backup | `-d ~/Documents` |
 | `-o, --output` | Backup destination directory | `-o ~/Backups` |
 | `-t, --time-period` | Backup schedule | `-t daily` or `-t "0 3 * * *"` |
-| `-b, --backup-count` | Number of backups to keep | `-b 10` |
+| `-b, --backup-count <num>` | Number of backups to keep (default: 5) | `-b 10` |
+| `-c, --compression <type>` | Compression method (tar.gz/zip/tar.bz2/tar.xz) | `-c zip` |
 | `-i, --interactive` | Launch interactive mode | `-i` |
 
 ### Schedule Presets
@@ -148,6 +150,14 @@ Keep 30 backups for critical data:
 ./backmeup.sh backup start -d ~/Important -o ~/Archives -t daily -b 30
 ```
 
+### Different Compression Formats
+
+Use `zip` for compatibility or `tar.xz` for better compression:
+
+```bash
+./backmeup.sh backup start -d ~/Photos -o ~/Backups -t weekly -c tar.xz
+```
+
 ### Update Existing Backup
 
 Change schedule or retention:
@@ -178,6 +188,7 @@ Source:     /home/user/Documents
 Output:     /home/user/Backups
 Schedule:   daily
 Keep:       7 backups
+Format:     tar.gz
 Script:     /home/user/Backups/.backmeup/backup_Documents.sh
 ---
 ```
@@ -233,16 +244,16 @@ Output directory:
 
 Archives are created with the following naming convention:
 ```
-{source_name}_{YYYYMMDD}_{HHMMSS}.tar.gz
+{source_name}_{YYYYMMDD}_{HHMMSS}.{extension}
 ```
 
-Example: `Documents_20241118_140523.tar.gz`
+Example: `Documents_20241118_140523.tar.gz` or `Photos_20241118_140523.zip`
 
 ## Requirements
 
 - **OS**: Linux or macOS
 - **Shell**: Bash 4.0+
-- **Tools**: tar, gzip, cron
+- **Tools**: tar, gzip, cron (optional: zip, bzip2, xz)
 - **Permissions**: Write access to source and destination directories
 
 ## Troubleshooting
