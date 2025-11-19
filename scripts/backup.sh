@@ -149,6 +149,60 @@ check_and_install_tool() {
     return 0
 }
 
+check_compression_tool() {
+    local compression="$1"
+    local tool_name=""
+    local install_cmd=""
+    
+    case "$compression" in
+        "tar.gz")
+            tool_name="gzip"
+            if ! command -v gzip &>/dev/null; then
+                install_cmd="sudo apt-get install gzip"
+            fi
+            ;;
+        "tar.bz2")
+            tool_name="bzip2"
+            if ! command -v bzip2 &>/dev/null; then
+                install_cmd="sudo apt-get install bzip2"
+            fi
+            ;;
+        "tar.xz")
+            tool_name="xz"
+            if ! command -v xz &>/dev/null; then
+                install_cmd="sudo apt-get install xz-utils"
+            fi
+            ;;
+        "zip")
+            tool_name="zip"
+            if ! command -v zip &>/dev/null; then
+                install_cmd="sudo apt-get install zip"
+            fi
+            ;;
+    esac
+    
+    if [[ -n "$install_cmd" ]]; then
+        log_warning "Compression tool '$tool_name' is not installed."
+        echo ""
+        read -p "Would you like to install it now? (y/n): " choice
+        if [[ "$choice" == "y" ]] || [[ "$choice" == "Y" ]]; then
+            log_info "Installing $tool_name..."
+            eval "$install_cmd"
+            if [[ $? -eq 0 ]]; then
+                log_success "$tool_name installed successfully"
+            else
+                log_error "Failed to install $tool_name"
+                return 1
+            fi
+        else
+            log_error "Cannot create backup without $tool_name"
+            return 1
+        fi
+    fi
+    
+    return 0
+}
+
 show_usage() {
 cat << 'EOF'
 Usage: backup.sh <command> [options]
@@ -240,43 +294,26 @@ REMOTE_PATH="REMOTE_PATH_PLACEHOLDER"
 DELETE_AFTER="DELETE_AFTER_PLACEHOLDER"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
 
-# Determine extension and command
-case $COMPRESSION in
-    "zip")
-        EXT=".zip"
-        CMD="zip -r"
-        ;;
-    "tar.bz2")
-        EXT=".tar.bz2"
-        CMD="tar -cjf"
-        ;;
-    "tar.xz")
-        EXT=".tar.xz"
-        CMD="tar -cJf"
-        ;;
-    *)
-        EXT=".tar.gz"
-        CMD="tar -czf"
-        ;;
-esac
+declare -A COMPRESSION_MAP=(
+    ["tar.gz"]=".tar.gz|z"
+    ["tar.bz2"]=".tar.bz2|j"
+    ["tar.xz"]=".tar.xz|J"
+    ["zip"]=".zip|zip"
+)
 
+IFS='|' read -r EXT FLAG <<< "${COMPRESSION_MAP[$COMPRESSION]:-".tar.gz|z"}"
 BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}${EXT}"
-
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
 
 # Execute backup
-if [[ "$COMPRESSION" == "zip" ]]; then
-    # zip needs special handling for directory
-    cd "$(dirname "$SOURCE")" && $CMD "$BACKUP_FILE" "$(basename "$SOURCE")" >/dev/null
+if [[ "$FLAG" == "zip" ]]; then
+    cd "$(dirname "$SOURCE")" && zip -r "$BACKUP_FILE" "$(basename "$SOURCE")" >/dev/null
 else
-    $CMD "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null
+    tar -c${FLAG}f "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null
 fi
 
 if [[ $? -eq 0 ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Backup completed: $(du -h "$BACKUP_FILE" | cut -f1)"
-    
-    # Cleanup old backups
-    # Note: We need to be careful to only delete files with the same extension
     BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*${EXT} 2>/dev/null))
     if [[ ${#BACKUP_FILES[@]} -gt $BACKUP_COUNT ]]; then
         for ((i=$BACKUP_COUNT; i<${#BACKUP_FILES[@]}; i++)); do
@@ -590,9 +627,7 @@ start_backup(){
     echo ""
     log_info "Starting backup setup..."
     log_info "Backup name: $backup_name"
-    log_info "Backup name: $backup_name"
     log_info "Source: $directory"
-    log_info "Destination: $output_dir"
     log_info "Destination: $output_dir"
     log_info "Schedule: $time_period"
     log_info "Compression: $compression_method"
@@ -603,6 +638,10 @@ start_backup(){
         fi
     fi
     echo ""
+    
+    if ! check_compression_tool "$compression_method"; then
+        return 1
+    fi
     
     create_backup_script_template "$directory" "$output_dir" "$time_period" "$backup_count" "$backup_name" "$compression_method" "$remote_enabled" "$remote_user" "$remote_host" "$remote_path" "$delete_after"
     

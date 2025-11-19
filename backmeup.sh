@@ -10,7 +10,12 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts"
+# Determine script directory (works for both installed and local execution)
+if [[ -d "/usr/local/lib/backmeup" ]]; then
+    SCRIPT_DIR="/usr/local/lib/backmeup"
+else
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/scripts"
+fi
 
 show_usage() {
 cat << 'EOF'
@@ -27,13 +32,16 @@ BackMeUp - Automated Backup Solution
 Usage: backmeup <command> [options]
 
 Commands:
-  backup <start|update|delete|list|create|restore>  Manage backups
-  help                                              Show this help message
+  backup <start|update|delete|list>  Manage backups
+  test                               Run test suite
+  uninstall                          Uninstall BackMeUp
+  help                               Show this help message
 
 "backup start" Options:
   -d, --directory <path>     Source directory to backup
   -o, --output <path>        Backup destination directory
   -t, --time-period <time>   Schedule (hourly/daily/weekly/monthly/cron)
+  -c, --compression <type>   Compression format (tar.gz/tar.bz2/tar.xz/zip)
   -b, --backup-count <num>   Number of backups to keep (default: 5)
   -i, --interactive          Interactive mode
 
@@ -41,24 +49,48 @@ Examples:
     backmeup backup start -i
     backmeup backup start -d ~/Documents -o ~/Backups -t daily
     backmeup backup start -d ~/Photos -o /backup -t "0 3 * * *" -b 10
-    backmeup backup create -d ~/Documents -o ~/Backups
-    backmeup backup restore -f ~/Backups/Documents_20231118_120000.tar.gz -o ~/Restored
+    backmeup backup list
+    backmeup test
+    backmeup uninstall
 EOF
 }
 
-handle_command(){
-    local cmd=$1
-    shift
-    case $cmd in
-        "backup")
-            exec bash "${SCRIPT_DIR}/backup.sh" "$@"
+handle_command() {
+    case "$1" in
+        backup)
+            shift
+            source "${SCRIPT_DIR}/backup.sh"
+            if [[ $# -eq 0 ]]; then
+                start_backup
+            else
+                start_backup "$@"
+            fi
             ;;
-        "help"|"-h"|"--help")
+        test)
+            if [[ -f "${SCRIPT_DIR}/../test/test.sh" ]]; then
+                "${SCRIPT_DIR}/../test/test.sh"
+            elif [[ -f "/usr/local/lib/backmeup/../test/test.sh" ]]; then
+                /usr/local/lib/backmeup/../test/test.sh
+            else
+                echo "Error: Test suite not found"
+                exit 1
+            fi
+            ;;
+        uninstall)
+            if [[ -f "/usr/local/lib/backmeup/uninstall.sh" ]]; then
+                /usr/local/lib/backmeup/uninstall.sh
+            else
+                echo "Error: Uninstaller not found"
+                exit 1
+            fi
+            ;;
+        help|--help|-h)
             show_usage
             ;;
         *)
-            echo "Unknown command: $cmd"
-            echo "Use 'backmeup help' to see available commands."
+            echo "Error: Unknown command '$1'"
+            echo ""
+            show_usage
             exit 1
             ;;
     esac

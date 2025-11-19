@@ -35,9 +35,72 @@ BackMeUp is a simple yet powerful backup automation tool that helps you schedule
 
 ## Installation
 
-### Quick Install
+### One-Line Install
+
+Install BackMeUp with a single command:
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/metharda/backmeup/main/scripts/install.sh | bash
+```
+
+Or using wget:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/metharda/backmeup/main/scripts/install.sh | bash
+```
+
+This will:
+- Download all required scripts to `/usr/local/lib/backmeup`
+- Install main binary to `/usr/local/bin/backmeup`
+- Make the command available system-wide
+
+### Manual Install from Repository
+
+If you prefer to install from a cloned repository:
+
+```bash
+git clone https://github.com/metharda/backmeup.git
+cd backmeup/scripts
+chmod +x install.sh
+./install.sh
+```
+
+The installer will detect it's running from the repository and install all files properly.
+
+### Verification
+
+Verify the installation:
+
+```bash
+backmeup help
+```
+
+## Uninstallation
+
+### Using Command
+
+The easiest way to uninstall:
+
+```bash
+backmeup uninstall
+```
+
+### Direct Script
+
+Or run the uninstaller directly:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/metharda/backmeup/main/scripts/uninstall.sh | bash
+```
+
+The uninstaller will:
+- Remove the binary from `/usr/local/bin`
+- Delete library files from `/usr/local/lib/backmeup`
+- Optionally remove backup configurations
+- Clean up `.backmeup` directories
+- Remove associated cron jobs
+
+You'll be prompted to confirm each step.
 git clone https://github.com/metharda/backmeup.git
 cd backmeup
 chmod +x backmeup.sh scripts/*.sh
@@ -251,9 +314,10 @@ Example: `Documents_20241118_140523.tar.gz` or `Photos_20241118_140523.zip`
 
 ## Requirements
 
-- **OS**: Linux or macOS
+- **OS**: Linux (Ubuntu, Debian, CentOS, etc.)
 - **Shell**: Bash 4.0+
 - **Tools**: tar, gzip, cron (optional: zip, bzip2, xz)
+- **Optional**: zip, bzip2, xz (for additional compression formats)
 - **Permissions**: Write access to source and destination directories
 
 ## Troubleshooting

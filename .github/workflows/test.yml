@@ -1,0 +1,49 @@
+name: Test
+
+on:
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  shellcheck:
+    name: ShellCheck
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Find all shell scripts
+        id: find-scripts
+        run: |
+          echo "Found shell scripts:"
+          find . -type f -name "*.sh" -not -path "./.git/*" | tee scripts.txt
+          
+      - name: Run ShellCheck
+        run: |
+          if ! command -v shellcheck &> /dev/null; then
+            sudo apt-get update
+            sudo apt-get install -y shellcheck
+          fi
+          
+          exit_code=0
+          while IFS= read -r script; do
+            echo "Checking $script..."
+            if ! shellcheck -S error "$script"; then
+              exit_code=1
+            fi
+          done < scripts.txt
+          
+          exit $exit_code
+
+  test:
+    name: Functional Tests
+    runs-on: ubuntu-latest
+    needs: shellcheck
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run tests
+        run: |
+          chmod +x test/test.sh
+          ./test/test.sh
