@@ -72,7 +72,7 @@ The installer will detect it's running from the repository and install all files
 Verify the installation:
 
 ```bash
-backmeup backup help
+backmeup help
 ```
 
 ## Uninstallation
