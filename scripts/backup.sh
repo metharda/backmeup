@@ -241,9 +241,10 @@ create_backup_script_template() {
         }
     fi
     
-    local backmeup_dir="${output_dir}/.backmeup"
+    # Store script in source directory's .backmeup folder
+    local backmeup_dir="${source_dir}/.backmeup"
     if [[ ! -d "$backmeup_dir" ]]; then
-        log_info "Creating .backmeup directory for scripts"
+        log_info "Creating .backmeup directory for scripts in source"
         mkdir -p "$backmeup_dir" || {
             log_error "Failed to create .backmeup directory"
             return 1
@@ -285,11 +286,10 @@ IFS='|' read -r EXT FLAG <<< "${COMPRESSION_MAP[$COMPRESSION]:-".tar.gz|z"}"
 BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}${EXT}"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
 
-# Execute backup
 if [[ "$FLAG" == "zip" ]]; then
-    cd "$(dirname "$SOURCE")" && zip -r "$BACKUP_FILE" "$(basename "$SOURCE")" >/dev/null
+    cd "$(dirname "$SOURCE")" && zip -r "$BACKUP_FILE" "$(basename "$SOURCE")" -x "$(basename "$SOURCE")/.backmeup/*" >/dev/null
 else
-    tar -c${FLAG}f "$BACKUP_FILE" -C "$(dirname "$SOURCE")" "$(basename "$SOURCE")" 2>/dev/null
+    tar -c${FLAG}f "$BACKUP_FILE" -C "$(dirname "$SOURCE")" --exclude=".backmeup" "$(basename "$SOURCE")" 2>/dev/null
 fi
 
 if [[ $? -eq 0 ]]; then
@@ -306,7 +306,6 @@ else
     exit 1
 fi
 
-# Remote Transfer
 if [[ "$REMOTE_ENABLED" == "true" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting remote transfer to ${REMOTE_HOST}..."
     
@@ -315,7 +314,6 @@ if [[ "$REMOTE_ENABLED" == "true" ]]; then
     if [[ $? -eq 0 ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Remote transfer successful"
         
-        # Remote Rotation - cleanup old backups on remote server
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking remote backups for rotation..."
         REMOTE_BASENAME=$(basename "$SOURCE")
         
@@ -344,7 +342,6 @@ REMOTE_SCRIPT
         fi
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Remote transfer failed"
-        # Don't fail the whole script if remote transfer fails, but log it
     fi
 fi
 TEMPLATE_EOF
@@ -441,6 +438,7 @@ start_backup(){
     local time_period=""
     local backup_count="5"
     local compression_method="tar.gz"
+    local backup_type="local"
     local remote_enabled="false"
     local remote_user=""
     local remote_host=""
@@ -487,19 +485,181 @@ start_backup(){
     
     if [[ "$interactive" == true ]]; then
         echo ""
-        echo "=== BackMeUp Interactive Setup ==="
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+        echo "     BackMeUp Interactive Setup        "
+        echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
         echo ""
         
+        # Step 1: Get source directory first
+        log_info "Step 1/6: Source directory"
         if [[ -z "$directory" ]]; then
-            read -p "Source directory to backup: " directory
+            read -p "Enter source directory to backup: " directory
             directory=$(expand_path "$directory")
         fi
         
-        if [[ -z "$output_dir" ]]; then
-            read -p "Backup destination directory: " output_dir
-            output_dir=$(expand_path "$output_dir")
+        # Step 2: Select backup type
+        echo ""
+        log_info "Step 2/6: Select backup type"
+        echo ""
+        echo "1) Local only"
+        echo "2) Remote only"
+        echo "3) Both (local + remote)"
+        echo ""
+        read -p "Choose backup type [1-3] (default: 1): " type_choice
+        
+        case "$type_choice" in
+            2)
+                backup_type="remote"
+                log_info "Selected: Remote backup only"
+                ;;
+            3)
+                backup_type="both"
+                log_info "Selected: Local + Remote backup"
+                ;;
+            *)
+                backup_type="local"
+                log_info "Selected: Local backup only"
+                ;;
+        esac
+        
+        # Step 3: Configure based on backup type
+        if [[ "$backup_type" == "local" ]] || [[ "$backup_type" == "both" ]]; then
+            echo ""
+            log_info "Step 3/6: Local backup destination"
+            if [[ -z "$output_dir" ]]; then
+                read -p "Enter local backup destination directory: " output_dir
+                output_dir=$(expand_path "$output_dir")
+            fi
         fi
         
+        # Test remote connection if needed
+        if [[ "$backup_type" == "remote" ]] || [[ "$backup_type" == "both" ]]; then
+            echo ""
+            log_info "Step 3/6: Remote backup configuration"
+            
+            if ! check_ssh_key; then
+                log_warning "No SSH key found"
+                read -p "Generate SSH key now? [Y/n]: " gen_key
+                if [[ "$gen_key" =~ ^[Yy]$ ]] || [[ -z "$gen_key" ]]; then
+                    generate_ssh_key
+                else
+                    log_error "SSH key required for remote backup"
+                    if [[ "$backup_type" == "remote" ]]; then
+                        log_warning "Cannot continue without SSH key"
+                        log_info "Switching to local backup"
+                        backup_type="local"
+                        if [[ -z "$output_dir" ]]; then
+                            read -p "Enter local backup destination directory: " output_dir
+                            output_dir=$(expand_path "$output_dir")
+                        fi
+                    else
+                        log_warning "Remote backup disabled, continuing with local only"
+                        backup_type="local"
+                    fi
+                fi
+            fi
+            
+            if [[ "$backup_type" == "remote" ]] || [[ "$backup_type" == "both" ]]; then
+                echo ""
+                read -p "Remote user (e.g., root): " remote_user
+                read -p "Remote host (e.g., 192.168.1.50): " remote_host
+                read -p "Remote path (e.g., /var/backups): " remote_path
+                
+                while [[ -z "$remote_user" ]] || [[ -z "$remote_host" ]] || [[ -z "$remote_path" ]]; do
+                    log_warning "All remote fields are required!"
+                    [[ -z "$remote_user" ]] && read -p "Remote user: " remote_user
+                    [[ -z "$remote_host" ]] && read -p "Remote host: " remote_host
+                    [[ -z "$remote_path" ]] && read -p "Remote path: " remote_path
+                done
+                
+                echo ""
+                test_ssh_connection "$remote_user" "$remote_host"
+                local ssh_result=$?
+                
+                if [[ $ssh_result -ne 0 ]]; then
+                    echo ""
+                    log_error "Failed to connect to remote server"
+                    
+                    if [[ $ssh_result -eq 2 ]]; then
+                        echo ""
+                        log_info "Your SSH key needs to be authorized on the remote server"
+                        read -p "Copy SSH key to remote server now? [Y/n]: " copy_key
+                        if [[ "$copy_key" =~ ^[Yy]$ ]] || [[ -z "$copy_key" ]]; then
+                            copy_ssh_key "$remote_user" "$remote_host"
+                            echo ""
+                            log_info "Retesting connection..."
+                            if test_ssh_connection "$remote_user" "$remote_host"; then
+                                log_success "SSH connection successful!"
+                                remote_enabled="true"
+                            else
+                                log_error "Connection still failing"
+                                if [[ "$backup_type" == "remote" ]]; then
+                                    log_warning "Cannot continue with remote-only backup"
+                                    log_info "Switching to local backup"
+                                    backup_type="local"
+                                    remote_enabled="false"
+                                else
+                                    log_warning "Remote backup disabled, continuing with local only"
+                                    backup_type="local"
+                                    remote_enabled="false"
+                                fi
+                            fi
+                        else
+                            if [[ "$backup_type" == "remote" ]]; then
+                                log_warning "Cannot continue without SSH access"
+                                log_info "Switching to local backup"
+                                backup_type="local"
+                                remote_enabled="false"
+                            else
+                                log_warning "Remote backup disabled, continuing with local only"
+                                backup_type="local"
+                                remote_enabled="false"
+                            fi
+                        fi
+                    else
+                        if [[ "$backup_type" == "remote" ]]; then
+                            log_warning "Cannot continue with remote-only backup"
+                            log_info "Switching to local backup"
+                            backup_type="local"
+                            remote_enabled="false"
+                        else
+                            log_warning "Remote backup disabled, continuing with local only"
+                            backup_type="local"
+                            remote_enabled="false"
+                        fi
+                    fi
+                else
+                    log_success "SSH connection successful!"
+                    remote_enabled="true"
+                    
+                    if [[ "$backup_type" == "both" ]]; then
+                        echo ""
+                        read -p "Delete local backup after successful remote transfer? [y/N]: " del_choice
+                        if [[ "$del_choice" =~ ^[Yy]$ ]]; then
+                            delete_after="true"
+                            log_info "Local backups will be deleted after remote transfer"
+                        fi
+                    fi
+                fi
+            fi
+        fi
+        
+        # Remote-only mode needs a temporary local path for creating backup before transfer
+        if [[ "$backup_type" == "remote" ]] && [[ -z "$output_dir" ]]; then
+            output_dir="/tmp/backmeup_temp"
+            log_info "Using temporary local path: $output_dir"
+        fi
+        
+        # Step 4: Compression format
+        echo ""
+        log_info "Step 4/6: Compression format"
+        if [[ -z "$compression_method" ]] || [[ "$compression_method" == "tar.gz" ]]; then
+            compression_method=$(select_compression_method)
+        fi
+        
+        # Step 5: Backup schedule
+        echo ""
+        log_info "Step 5/6: Backup schedule"
         if [[ -z "$time_period" ]]; then
             time_period=$(select_time_period)
             if [[ -z "$time_period" ]]; then
@@ -507,55 +667,16 @@ start_backup(){
             fi
         fi
         
+        # Step 6: Retention policy
+        echo ""
+        log_info "Step 6/6: Retention policy"
         if [[ -z "$backup_count" ]] || [[ "$backup_count" == "5" ]]; then
             read -p "Number of backups to keep (default: 5): " input_count
             backup_count="${input_count:-5}"
         fi
-        
-        if [[ -z "$compression_method" ]] || [[ "$compression_method" == "tar.gz" ]]; then
-            compression_method=$(select_compression_method)
-        fi
-        
-        echo ""
-        read -p "Enable remote backup? [y/N]: " enable_remote
-        if [[ "$enable_remote" =~ ^[Yy]$ ]]; then
-            remote_enabled="true"
-            
-            if ! check_ssh_key; then
-                echo "No SSH key found. Generating one..."
-                generate_ssh_key
-            fi
-            
-            read -p "Remote User (e.g., root): " remote_user
-            read -p "Remote Host (e.g., 192.168.1.50): " remote_host
-            read -p "Remote Path (e.g., /var/backups): " remote_path
-            
-            while [[ -z "$remote_path" ]]; do
-                echo ""
-                log_warning "Remote path cannot be empty!"
-                read -p "Remote Path (e.g., /var/backups): " remote_path
-            done
-            
-            echo ""
-            echo "Testing connection..."
-            if ! test_ssh_connection "$remote_user" "$remote_host"; then
-                echo "Connection failed or password required."
-                read -p "Do you want to copy your SSH key to the server? [Y/n]: " copy_key
-                if [[ "$copy_key" =~ ^[Yy]$ ]] || [[ -z "$copy_key" ]]; then
-                    copy_ssh_key "$remote_user" "$remote_host"
-                fi
-            else
-                echo "Connection successful!"
-            fi
-            
-            read -p "Delete local backup after successful transfer? [y/N]: " del_choice
-            if [[ "$del_choice" =~ ^[Yy]$ ]]; then
-                delete_after="true"
-            fi
-        fi
     fi
     
-    if [[ -z "$directory" ]] || [[ -z "$output_dir" ]] || [[ -z "$time_period" ]]; then
+    if [[ -z "$directory" ]] || [[ -z "$time_period" ]]; then
         log_error "Missing required parameters"
         echo ""
         echo "Usage: backup.sh start [OPTIONS]"
@@ -669,7 +790,7 @@ update_backup() {
         return 1
     fi
     
-    IFS='|' read -r name source output script old_schedule old_count <<< "$config_line"
+    IFS='|' read -r name source output script old_schedule old_count compression remote_enabled remote_user remote_host remote_path delete_after <<< "$config_line"
     
     local new_schedule="$old_schedule"
     local new_count="$old_count"
@@ -691,6 +812,8 @@ update_backup() {
         esac
     done
     
+    log_info "Updating backup: $backup_name"
+    
     if [[ ! -f "$script" ]]; then
         log_error "Backup script not found: $script"
         return 1
@@ -700,16 +823,20 @@ update_backup() {
     rm -f "${script}.bak"
     
     if [[ "$new_schedule" != "$old_schedule" ]]; then
+        log_info "Updating schedule from '$old_schedule' to '$new_schedule'"
         bash "${SCRIPT_DIR}/cron.sh" remove "${backup_name}"
         bash "${SCRIPT_DIR}/cron.sh" add "$script" "$new_schedule"
     fi
     
     remove_backup_config "$backup_name"
-    save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count"
+    save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count" "$compression" "$remote_enabled" "$remote_user" "$remote_host" "$remote_path" "$delete_after"
     
     log_success "Backup '$backup_name' updated successfully"
-    echo "Schedule: $new_schedule"
-    echo "Keep: $new_count backups"
+    echo "  Schedule: $new_schedule"
+    echo "  Keep: $new_count backups"
+    if [[ "$remote_enabled" == "true" ]]; then
+        echo "  Remote: ${remote_user}@${remote_host}:${remote_path}"
+    fi
 }
 
 delete_backup() {
@@ -728,17 +855,19 @@ delete_backup() {
         return 1
     fi
     
-    IFS='|' read -r name source output script schedule count <<< "$config_line"
+    IFS='|' read -r name source output script schedule count compression remote_enabled remote_user remote_host remote_path delete_after <<< "$config_line"
+    
+    log_info "Deleting backup: $backup_name"
     
     if [[ -f "$script" ]]; then
         rm -f "$script"
-        log_info "Removed backup script: $script"
+        log_success "Removed backup script: $script"
         
         local backmeup_dir="$(dirname "$script")"
         if [[ -d "$backmeup_dir" ]] && [[ "$(basename "$backmeup_dir")" == ".backmeup" ]]; then
             if [[ -z "$(ls -A "$backmeup_dir" 2>/dev/null)" ]]; then
                 rm -rf "$backmeup_dir"
-                log_info "Removed empty .backmeup directory: $backmeup_dir"
+                log_success "Removed empty .backmeup directory"
             fi
         fi
     fi
@@ -746,6 +875,13 @@ delete_backup() {
     bash "${SCRIPT_DIR}/cron.sh" remove "${backup_name}" 2>/dev/null || true
     remove_backup_config "$backup_name"
     log_success "Backup '$backup_name' deleted successfully"
+    
+    if [[ "$remote_enabled" == "true" ]]; then
+        echo ""
+        log_info "Note: Remote backups on ${remote_user}@${remote_host}:${remote_path} were not deleted"
+        log_info "To clean up remote backups, connect manually:"
+        echo "  ssh ${remote_user}@${remote_host} 'rm -f ${remote_path}/${name}_*.${compression}'"
+    fi
 }
 
 restore_backup() {
@@ -824,7 +960,6 @@ restore_backup() {
         return 1
     fi
     
-    # Special check for unzip if it's a zip file
     if [[ "$compression_type" == "zip" ]] && ! command -v unzip &>/dev/null; then
         log_warning "unzip tool not found."
         read -p "Would you like to install it now? (y/n): " choice

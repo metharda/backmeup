@@ -47,17 +47,19 @@ if [[ -f "$REPO_ROOT/backmeup.sh" && -f "$SCRIPT_DIR/backup.sh" && -f "$SCRIPT_D
     
     $SUDO mkdir -p "$LIB_DIR"
     
-    $SUDO cp "$REPO_ROOT/backmeup.sh" "$INSTALL_DIR/backmeup"
-    $SUDO cp "$SCRIPT_DIR/backup.sh" "$LIB_DIR/"
-    $SUDO cp "$SCRIPT_DIR/cron.sh" "$LIB_DIR/"
-    $SUDO cp "$SCRIPT_DIR/install.sh" "$LIB_DIR/"
-    $SUDO cp "$SCRIPT_DIR/uninstall.sh" "$LIB_DIR/"
+    log_info "Copying scripts..."
+    for script in "$SCRIPT_DIR"/*.sh; do
+        if [[ -f "$script" ]]; then
+            script_name=$(basename "$script")
+            $SUDO cp "$script" "$LIB_DIR/"
+            $SUDO chmod +x "$LIB_DIR/$script_name"
+            log_success "Copied: $script_name"
+        fi
+    done
     
+    $SUDO cp "$REPO_ROOT/backmeup.sh" "$INSTALL_DIR/backmeup"
     $SUDO chmod +x "$INSTALL_DIR/backmeup"
-    $SUDO chmod +x "$LIB_DIR/backup.sh"
-    $SUDO chmod +x "$LIB_DIR/cron.sh"
-    $SUDO chmod +x "$LIB_DIR/install.sh"
-    $SUDO chmod +x "$LIB_DIR/uninstall.sh"
+    log_success "Installed: backmeup"
 else
     log_info "Downloading from GitHub..."
     if ! command -v curl &>/dev/null && ! command -v wget &>/dev/null; then
@@ -80,19 +82,36 @@ else
     
     $SUDO mkdir -p "$LIB_DIR"
     
+    log_info "Downloading backmeup.sh..."
     $DOWNLOAD_CMD "$REPO_URL/backmeup.sh" | $SUDO tee "$INSTALL_DIR/backmeup" >/dev/null
-    $DOWNLOAD_CMD "$REPO_URL/scripts/backup.sh" | $SUDO tee "$LIB_DIR/backup.sh" >/dev/null
-    $DOWNLOAD_CMD "$REPO_URL/scripts/cron.sh" | $SUDO tee "$LIB_DIR/cron.sh" >/dev/null
-    $DOWNLOAD_CMD "$REPO_URL/scripts/install.sh" | $SUDO tee "$LIB_DIR/install.sh" >/dev/null
-    $DOWNLOAD_CMD "$REPO_URL/scripts/uninstall.sh" | $SUDO tee "$LIB_DIR/uninstall.sh" >/dev/null
-    
     $SUDO chmod +x "$INSTALL_DIR/backmeup"
-    $SUDO chmod +x "$LIB_DIR/backup.sh"
-    $SUDO chmod +x "$LIB_DIR/cron.sh"
-    $SUDO chmod +x "$LIB_DIR/install.sh"
-    $SUDO chmod +x "$LIB_DIR/uninstall.sh"
+    log_success "Downloaded: backmeup"
     
-    log_success "Scripts downloaded"
+    log_info "Fetching script list from GitHub..."
+    GITHUB_API="https://api.github.com/repos/metharda/backmeup/contents/scripts"
+    
+    if command -v curl &>/dev/null; then
+        SCRIPT_LIST=$(curl -fsSL "$GITHUB_API" 2>/dev/null | grep '"name"' | grep '\.sh"' | sed 's/.*"name": "\(.*\.sh\)".*/\1/')
+    elif command -v wget &>/dev/null; then
+        SCRIPT_LIST=$(wget -qO- "$GITHUB_API" 2>/dev/null | grep '"name"' | grep '\.sh"' | sed 's/.*"name": "\(.*\.sh\)".*/\1/')
+    fi
+    
+    if [[ -z "$SCRIPT_LIST" ]]; then
+        log_warning "Could not fetch script list from API, using default list..."
+        SCRIPT_LIST="backup.sh cron.sh install.sh uninstall.sh ssh_utils.sh logger.sh"
+    fi
+    
+    for script_name in $SCRIPT_LIST; do
+        log_info "Downloading $script_name..."
+        if $DOWNLOAD_CMD "$REPO_URL/scripts/$script_name" | $SUDO tee "$LIB_DIR/$script_name" >/dev/null 2>&1; then
+            $SUDO chmod +x "$LIB_DIR/$script_name"
+            log_success "Downloaded: $script_name"
+        else
+            log_warning "Failed to download: $script_name (skipping)"
+        fi
+    done
+    
+    log_success "All scripts downloaded"
 fi
 
 if [[ -f "$INSTALL_DIR/backmeup" ]]; then

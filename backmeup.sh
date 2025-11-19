@@ -10,7 +10,6 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
-# Determine script directory (works for both installed and local execution)
 if [[ -d "/usr/local/lib/backmeup" ]]; then
     SCRIPT_DIR="/usr/local/lib/backmeup"
 else
