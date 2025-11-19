@@ -33,6 +33,7 @@ Usage: backmeup <command> [options]
 
 Commands:
   backup <start|update|delete|list>  Manage backups
+  test                               Run test suite
   uninstall                          Uninstall BackMeUp
   help                               Show this help message
 
@@ -49,33 +50,47 @@ Examples:
     backmeup backup start -d ~/Documents -o ~/Backups -t daily
     backmeup backup start -d ~/Photos -o /backup -t "0 3 * * *" -b 10
     backmeup backup list
+    backmeup test
     backmeup uninstall
 EOF
 }
 
-handle_command(){
-    local cmd=$1
-    shift
-    case $cmd in
-        "backup")
-            exec bash "${SCRIPT_DIR}/backup.sh" "$@"
-            ;;
-        "uninstall")
-            if [[ -f "/usr/local/lib/backmeup/uninstall.sh" ]]; then
-                exec bash "/usr/local/lib/backmeup/uninstall.sh"
-            elif [[ -f "${SCRIPT_DIR}/uninstall.sh" ]]; then
-                exec bash "${SCRIPT_DIR}/uninstall.sh"
+handle_command() {
+    case "$1" in
+        backup)
+            shift
+            source "${SCRIPT_DIR}/backup.sh"
+            if [[ $# -eq 0 ]]; then
+                start_backup
             else
-                print_error "Uninstaller not found"
+                start_backup "$@"
+            fi
+            ;;
+        test)
+            if [[ -f "${SCRIPT_DIR}/../test/test.sh" ]]; then
+                "${SCRIPT_DIR}/../test/test.sh"
+            elif [[ -f "/usr/local/lib/backmeup/../test/test.sh" ]]; then
+                /usr/local/lib/backmeup/../test/test.sh
+            else
+                echo "Error: Test suite not found"
                 exit 1
             fi
             ;;
-        "help"|"-h"|"--help")
+        uninstall)
+            if [[ -f "/usr/local/lib/backmeup/uninstall.sh" ]]; then
+                /usr/local/lib/backmeup/uninstall.sh
+            else
+                echo "Error: Uninstaller not found"
+                exit 1
+            fi
+            ;;
+        help|--help|-h)
             show_usage
             ;;
         *)
-            echo "Unknown command: $cmd"
-            echo "Use 'backmeup help' to see available commands."
+            echo "Error: Unknown command '$1'"
+            echo ""
+            show_usage
             exit 1
             ;;
     esac
