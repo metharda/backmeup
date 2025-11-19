@@ -1,20 +1,12 @@
 # BackMeUp
-
 <div align="center">
 
 ![License](https://img.shields.io/badge/license-MIT-blue.svg)
 ![Shell](https://img.shields.io/badge/shell-bash-green.svg)
 ![Platform](https://img.shields.io/badge/platform-linux-lightgrey.svg)
 
-**A lightweight, automated backup solution for Linux**
-
-[Features](#features) • [Installation](#installation) • [Quick Start](#quick-start) • [Usage](#usage) • [Examples](#examples)
-
 </div>
 
----
-
-## Overview
 
 BackMeUp is a simple yet powerful backup automation tool that helps you schedule and manage directory backups with ease. It provides an intuitive CLI interface, automatic rotation, and flexible scheduling options through cron integration.
 
@@ -283,11 +275,7 @@ Check your backup configurations:
 cat ~/.config/backmeup/backups.conf
 ```
 
-## License
-
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 <div align="center">
-Made with ❤️ for simple and reliable backups
-</div>
 a small backup script
+</div>
