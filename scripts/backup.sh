@@ -261,8 +261,23 @@ create_backup_script_template() {
         return 1
     fi
     
+    # Copy logger.sh to the .backmeup directory
+    if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then
+        cp "${SCRIPT_DIR}/logger.sh" "${backmeup_dir}/logger.sh"
+        log_info "Copied logger.sh to .backmeup directory"
+    else
+        log_warning "logger.sh not found, backup script will not have logging support"
+    fi
+    
 cat > "$script_path" << 'TEMPLATE_EOF'
 #!/usr/bin/env bash
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then
+    source "${SCRIPT_DIR}/logger.sh"
+else
+    logger() { :; }
+fi
 
 SOURCE="SOURCE_DIR_PLACEHOLDER"
 OUTPUT="OUTPUT_DIR_PLACEHOLDER"
@@ -281,10 +296,11 @@ declare -A COMPRESSION_MAP=(
     ["tar.xz"]=".tar.xz|J"
     ["zip"]=".zip|zip"
 )
-
+    
 IFS='|' read -r EXT FLAG <<< "${COMPRESSION_MAP[$COMPRESSION]:-".tar.gz|z"}"
 BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}${EXT}"
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
+logger "INFO" "Starting backup of $SOURCE"
 
 if [[ "$FLAG" == "zip" ]]; then
     cd "$(dirname "$SOURCE")" && zip -r "$BACKUP_FILE" "$(basename "$SOURCE")" -x "$(basename "$SOURCE")/.backmeup/*" >/dev/null
@@ -294,26 +310,31 @@ fi
 
 if [[ $? -eq 0 ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Backup completed: $(du -h "$BACKUP_FILE" | cut -f1)"
+    logger "SUCCESS" "Backup completed: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
     BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*${EXT} 2>/dev/null))
     if [[ ${#BACKUP_FILES[@]} -gt $BACKUP_COUNT ]]; then
         for ((i=$BACKUP_COUNT; i<${#BACKUP_FILES[@]}; i++)); do
             rm -f "${BACKUP_FILES[$i]}"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed old backup: $(basename "${BACKUP_FILES[$i]}")"
+            logger "INFO" "Removed old backup: ${BACKUP_FILES[$i]}"
         done
     fi
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Backup failed"
+    logger "ERROR" "Backup failed for $SOURCE"
     exit 1
 fi
 
 if [[ "$REMOTE_ENABLED" == "true" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting remote transfer to ${REMOTE_HOST}..."
+    logger "INFO" "Starting remote transfer to ${REMOTE_HOST}"
     
     scp -o BatchMode=yes "$BACKUP_FILE" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
     
     if [[ $? -eq 0 ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Remote transfer successful"
-        
+        logger "SUCCESS" "Remote transfer successful to ${REMOTE_HOST}"
+
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking remote backups for rotation..."
         REMOTE_BASENAME=$(basename "$SOURCE")
         
@@ -335,15 +356,20 @@ else
     echo "No rotation needed (keeping \$KEEP)"
 fi
 REMOTE_SCRIPT
+
+        logger "INFO" "Remote backup rotation check completed"
         
         if [[ "$DELETE_AFTER" == "true" ]]; then
             rm -f "$BACKUP_FILE"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed local backup file"
+            logger "INFO" "Removed local backup file: $BACKUP_FILE"
         fi
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Remote transfer failed"
+        logger "ERROR" "Remote transfer failed to ${REMOTE_HOST}"
     fi
 fi
+logger "INFO" "Backup script finished"
 TEMPLATE_EOF
 
     sed -i.bak "s|SOURCE_DIR_PLACEHOLDER|$source_dir|g" "$script_path"
