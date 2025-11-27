@@ -1,0 +1,36 @@
+# Backup files
+*.tar.gz
+*.tar.bz2
+*.tar.xz
+*.zip
+
+# Log files
+*.log
+*.log.*
+
+# Backup script directories
+.backmeup/
+
+# Temporary files
+*.tmp
+*.bak
+*.swp
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+*.iml
+
+# Configuration files with sensitive data
+config/backups.conf
+.config/backmeup/
+
+# Test artifacts
+test/*.tar.gz
+test/*.zip
+test/*.log
