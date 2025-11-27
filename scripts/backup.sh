@@ -20,6 +20,10 @@ CONFIG_DIR="${HOME}/.config/backmeup"
 CONFIG_FILE="${CONFIG_DIR}/backups.conf"
 SCRIPT_PATH=""
 
+if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then
+    source "${SCRIPT_DIR}/logger.sh"
+fi
+
 if [[ -f "${SCRIPT_DIR}/ssh_utils.sh" ]]; then
     source "${SCRIPT_DIR}/ssh_utils.sh"
 fi
@@ -261,24 +265,11 @@ create_backup_script_template() {
         return 1
     fi
     
-    # Copy logger.sh to the .backmeup directory
-    if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then
-        cp "${SCRIPT_DIR}/logger.sh" "${backmeup_dir}/logger.sh"
-        log_info "Copied logger.sh to .backmeup directory"
-    else
-        log_warning "logger.sh not found, backup script will not have logging support"
-    fi
-    
 cat > "$script_path" << 'TEMPLATE_EOF'
 #!/usr/bin/env bash
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then
-    source "${SCRIPT_DIR}/logger.sh"
-else
-    logger() { :; }
-fi
-
+LIB_DIR="/usr/local/lib/backmeup"
 SOURCE="SOURCE_DIR_PLACEHOLDER"
 OUTPUT="OUTPUT_DIR_PLACEHOLDER"
 BACKUP_COUNT="BACKUP_COUNT_PLACEHOLDER"
@@ -289,6 +280,9 @@ REMOTE_HOST="REMOTE_HOST_PLACEHOLDER"
 REMOTE_PATH="REMOTE_PATH_PLACEHOLDER"
 DELETE_AFTER="DELETE_AFTER_PLACEHOLDER"
 TIMESTAMP=$(date +"%Y%m%d_%H%M%S")
+LOG_FILE="${SCRIPT_DIR}/backup.log"
+
+source "${LIB_DIR}/logger.sh"
 
 declare -A COMPRESSION_MAP=(
     ["tar.gz"]=".tar.gz|z"
@@ -296,11 +290,28 @@ declare -A COMPRESSION_MAP=(
     ["tar.xz"]=".tar.xz|J"
     ["zip"]=".zip|zip"
 )
-    
+
 IFS='|' read -r EXT FLAG <<< "${COMPRESSION_MAP[$COMPRESSION]:-".tar.gz|z"}"
 BACKUP_FILE="${OUTPUT}/$(basename "$SOURCE")_${TIMESTAMP}${EXT}"
+
+if [[ ! -f "$LOG_FILE" ]] || [[ ! -s "$LOG_FILE" ]] || ! grep -q "Backup configuration initialized" "$LOG_FILE" 2>/dev/null; then
+    logger "INFO" "========================================" "$LOG_FILE"
+    logger "INFO" "Backup configuration initialized" "$LOG_FILE"
+    logger "INFO" "Source directory: $SOURCE" "$LOG_FILE"
+    logger "INFO" "Output directory: $OUTPUT" "$LOG_FILE"
+    logger "INFO" "Compression method: $COMPRESSION" "$LOG_FILE"
+    logger "INFO" "Backup retention count: $BACKUP_COUNT" "$LOG_FILE"
+    if [[ "$REMOTE_ENABLED" == "true" ]]; then
+        logger "INFO" "Remote backup enabled: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}" "$LOG_FILE"
+        if [[ "$DELETE_AFTER" == "true" ]]; then
+            logger "INFO" "Local deletion after remote transfer: enabled" "$LOG_FILE"
+        fi
+    fi
+    logger "INFO" "========================================" "$LOG_FILE"
+fi
+
 echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting backup: $SOURCE"
-logger "INFO" "Starting backup of $SOURCE"
+logger "INFO" "Starting backup of $SOURCE to $BACKUP_FILE" "$LOG_FILE"
 
 if [[ "$FLAG" == "zip" ]]; then
     cd "$(dirname "$SOURCE")" && zip -r "$BACKUP_FILE" "$(basename "$SOURCE")" -x "$(basename "$SOURCE")/.backmeup/*" >/dev/null
@@ -310,31 +321,31 @@ fi
 
 if [[ $? -eq 0 ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Backup completed: $(du -h "$BACKUP_FILE" | cut -f1)"
-    logger "SUCCESS" "Backup completed: $BACKUP_FILE ($(du -h "$BACKUP_FILE" | cut -f1))"
+    logger "SUCCESS" "Backup completed successfully: $BACKUP_FILE" "$LOG_FILE"
     BACKUP_FILES=($(ls -t "${OUTPUT}"/$(basename "$SOURCE")_*${EXT} 2>/dev/null))
     if [[ ${#BACKUP_FILES[@]} -gt $BACKUP_COUNT ]]; then
         for ((i=$BACKUP_COUNT; i<${#BACKUP_FILES[@]}; i++)); do
             rm -f "${BACKUP_FILES[$i]}"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed old backup: $(basename "${BACKUP_FILES[$i]}")"
-            logger "INFO" "Removed old backup: ${BACKUP_FILES[$i]}"
+            logger "INFO" "Removed old backup: ${BACKUP_FILES[$i]}" "$LOG_FILE"
         done
     fi
 else
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Backup failed"
-    logger "ERROR" "Backup failed for $SOURCE"
+    logger "ERROR" "Backup failed for $SOURCE" "$LOG_FILE"
     exit 1
 fi
 
 if [[ "$REMOTE_ENABLED" == "true" ]]; then
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] Starting remote transfer to ${REMOTE_HOST}..."
-    logger "INFO" "Starting remote transfer to ${REMOTE_HOST}"
+    logger "INFO" "Starting remote transfer to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}" "$LOG_FILE"
     
     scp -o BatchMode=yes "$BACKUP_FILE" "${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}"
     
     if [[ $? -eq 0 ]]; then
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✓ Remote transfer successful"
-        logger "SUCCESS" "Remote transfer successful to ${REMOTE_HOST}"
-
+        logger "SUCCESS" "Remote transfer successful: ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}" "$LOG_FILE"
+        
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] Checking remote backups for rotation..."
         REMOTE_BASENAME=$(basename "$SOURCE")
         
@@ -356,20 +367,18 @@ else
     echo "No rotation needed (keeping \$KEEP)"
 fi
 REMOTE_SCRIPT
-
-        logger "INFO" "Remote backup rotation check completed"
         
+        logger "INFO" "Remote backup rotation check completed" "$LOG_FILE"
         if [[ "$DELETE_AFTER" == "true" ]]; then
             rm -f "$BACKUP_FILE"
             echo "[$(date '+%Y-%m-%d %H:%M:%S')] Removed local backup file"
-            logger "INFO" "Removed local backup file: $BACKUP_FILE"
+            logger "INFO" "Removed local backup file after remote transfer: $BACKUP_FILE" "$LOG_FILE"
         fi
     else
         echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✗ Remote transfer failed"
-        logger "ERROR" "Remote transfer failed to ${REMOTE_HOST}"
+        logger "ERROR" "Remote transfer failed to ${REMOTE_USER}@${REMOTE_HOST}:${REMOTE_PATH}" "$LOG_FILE"
     fi
 fi
-logger "INFO" "Backup script finished"
 TEMPLATE_EOF
 
     sed -i.bak "s|SOURCE_DIR_PLACEHOLDER|$source_dir|g" "$script_path"
@@ -858,6 +867,14 @@ update_backup() {
     save_backup_config "$backup_name" "$source" "$output" "$script" "$new_schedule" "$new_count" "$compression" "$remote_enabled" "$remote_user" "$remote_host" "$remote_path" "$delete_after"
     
     log_success "Backup '$backup_name' updated successfully"
+
+    local log_file="${source}/.backmeup/backup.log"
+    if [[ -f "$log_file" ]]; then
+        if [[ -f "${SCRIPT_DIR}/logger.sh" ]]; then            
+            logger "UPDATE" "Updated backup '$backup_name': Schedule '$new_schedule', Keep '$new_count'" "$log_file"
+        fi
+    fi
+
     echo "  Schedule: $new_schedule"
     echo "  Keep: $new_count backups"
     if [[ "$remote_enabled" == "true" ]]; then
@@ -901,6 +918,7 @@ delete_backup() {
     bash "${SCRIPT_DIR}/cron.sh" remove "${backup_name}" 2>/dev/null || true
     remove_backup_config "$backup_name"
     log_success "Backup '$backup_name' deleted successfully"
+    logger "DELETE" "Deleted backup '$backup_name'" "${source}/.backmeup/backup.log"
     
     if [[ "$remote_enabled" == "true" ]]; then
         echo ""
